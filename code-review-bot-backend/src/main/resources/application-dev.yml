@@ -1,0 +1,8 @@
+logging:
+  level:
+    com.codereviewbot: DEBUG
+
+deepseek:
+  api-key: ${DEEPSEEK_API_KEY:your-api-key-here}
+  api-url: https://api.deepseek.com/v1/chat/completions
+  model: deepseek-chat
