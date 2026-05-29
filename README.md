@@ -136,7 +136,7 @@ npm run dev
 
 ## 测试
 
-- **前端：** 25 个测试用例，覆盖 3 个模块（Pinia store、SSE 流解析、DiffViewer 渲染）
+- **前端：** 30 个测试用例，覆盖 3 个模块（Pinia store、SSE 流解析、DiffViewer 渲染）
 - **后端：** JUnit 5 集成测试框架（spring-boot-starter-test 已引入）
 
 ```bash
@@ -145,6 +145,37 @@ cd code-review-bot-fronted && npm test
 
 # 后端测试
 cd code-review-bot-backend && mvn test
+```
+
+## 生产部署
+
+### 前端
+
+前端使用 `createWebHistory()` 路由模式，生产环境需配置服务器将所有未知路径回退到 `index.html`。
+
+**Nginx 示例：**
+
+```nginx
+location / {
+    try_files $uri $uri/ /index.html;
+}
+```
+
+### 后端
+
+生产环境必须修改以下配置：
+
+1. **CORS：** 将 `application.yml` 的 profile 改为非 `dev`，或新增 `application-prod.yml` 配置具体的 `allowedOrigins`
+2. **API Key：** 通过环境变量 `DEEPSEEK_API_KEY` 配置，部署时不要在配置文件中硬编码
+3. **健康检查：** 访问 `/actuator/health` 可验证服务状态
+
+```bash
+# 构建
+cd code-review-bot-fronted && npm run build
+cd code-review-bot-backend && mvn clean package -DskipTests
+
+# 运行后端
+java -jar code-review-bot-backend/target/code-review-bot-1.0.0.jar
 ```
 
 ## License

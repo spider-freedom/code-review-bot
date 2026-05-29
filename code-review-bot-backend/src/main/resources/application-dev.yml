@@ -3,6 +3,8 @@ logging:
     com.codereviewbot: DEBUG
 
 deepseek:
-  api-key: ${DEEPSEEK_API_KEY:your-api-key-here}
+  api-key: ${DEEPSEEK_API_KEY}
   api-url: https://api.deepseek.com/v1/chat/completions
   model: deepseek-chat
+  temperature: 0.3
+  max-tokens: 8192

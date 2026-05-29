@@ -53,12 +53,17 @@ function parseDiff(text: string): DiffLine[] {
     }
 
     if (raw.startsWith('@@')) {
-      const match = raw.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/)
+      const match = raw.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@(.*)/)
       if (match) {
         oldLine = parseInt(match[1], 10)
         newLine = parseInt(match[2], 10)
       }
       result.push({ type: 'hunk', content: raw, sign: '', oldLine: undefined, newLine: undefined })
+      continue
+    }
+
+    if (raw === '\\ No newline at end of file') {
+      result.push({ type: 'header', content: raw, sign: '' })
       continue
     }
 

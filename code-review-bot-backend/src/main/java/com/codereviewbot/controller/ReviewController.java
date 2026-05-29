@@ -2,6 +2,7 @@ package com.codereviewbot.controller;
 
 import com.codereviewbot.dto.ReviewRequest;
 import com.codereviewbot.service.ReviewService;
+import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,7 +21,7 @@ public class ReviewController {
     }
 
     @PostMapping(value = "/review", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter review(@RequestBody ReviewRequest request) {
+    public SseEmitter review(@Valid @RequestBody ReviewRequest request) {
         return reviewService.reviewStream(request);
     }
 }

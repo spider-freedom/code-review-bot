@@ -6,6 +6,7 @@ import com.codereviewbot.service.ReviewService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,13 +25,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class ReviewServiceImpl implements ReviewService {
 
     private static final Logger log = LoggerFactory.getLogger(ReviewServiceImpl.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    private static final int MAX_CODE_LENGTH = 50_000; // 50KB
+    private static final int MAX_CODE_LENGTH = 50_000;
+
+    private final ExecutorService executor = Executors.newFixedThreadPool(4, r -> {
+        Thread t = new Thread(r, "review-worker");
+        t.setDaemon(true);
+        return t;
+    });
 
     @Value("${deepseek.api-url}")
     private String apiUrl;
@@ -41,6 +50,20 @@ public class ReviewServiceImpl implements ReviewService {
     @Value("${deepseek.model}")
     private String model;
 
+    @Value("${deepseek.temperature:0.3}")
+    private double temperature;
+
+    @Value("${deepseek.max-tokens:8192}")
+    private int maxTokens;
+
+    @PostConstruct
+    void validateConfig() {
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                "DEEPSEEK_API_KEY is not set. Configure it via the environment variable or application-dev.yml");
+        }
+    }
+
     @Override
     public SseEmitter reviewStream(ReviewRequest request) {
         SseEmitter emitter = new SseEmitter(300_000L);
@@ -49,68 +72,81 @@ public class ReviewServiceImpl implements ReviewService {
             try {
                 String code = request.getCode();
                 if (code == null || code.isBlank()) {
-                    sendDone(emitter, "代码为空，无需审查");
-                    emitter.complete();
+                    sendError(emitter, "代码为空，无法审查");
+                    safeComplete(emitter);
                     return;
                 }
 
                 if (code.length() > MAX_CODE_LENGTH) {
                     sendError(emitter, "代码过长，请限制在 50KB 以内");
-                    emitter.complete();
+                    safeComplete(emitter);
                     return;
                 }
 
                 callDeepSeekApi(code, request.getMode(), emitter);
-                emitter.complete();
+                safeComplete(emitter);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                emitter.completeWithError(e);
-            } catch (IOException e) {
-                log.warn("SSE connection closed: {}", e.getMessage());
-                try { emitter.complete(); } catch (Exception ignored) {}
+                safeCompleteWithError(emitter, e);
             } catch (Exception e) {
                 log.error("Review stream error", e);
                 try {
                     sendError(emitter, "审查过程出错: " + e.getMessage());
-                    emitter.complete();
                 } catch (IOException ignored) {
-                    try { emitter.complete(); } catch (Exception ignored2) {}
+                    // connection already closed
                 }
+                safeComplete(emitter);
             }
-        });
+        }, executor);
 
         return emitter;
     }
 
     private void callDeepSeekApi(String code, String mode, SseEmitter emitter) throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) URI.create(apiUrl).toURL().openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-        conn.setRequestProperty("Content-Type", "application/json");
-        conn.setDoOutput(true);
-        conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(300_000);
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) URI.create(apiUrl).toURL().openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(30_000);
+            conn.setReadTimeout(300_000);
 
-        String requestBody = buildRequestBody(code, mode);
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(requestBody.getBytes(StandardCharsets.UTF_8));
+            String requestBody = buildRequestBody(code, mode);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(requestBody.getBytes(StandardCharsets.UTF_8));
+            }
+
+            int status = conn.getResponseCode();
+            if (status != 200) {
+                String errorBody = readErrorBody(conn);
+                log.error("DeepSeek API error {}: {}", status, errorBody);
+                sendError(emitter, errorMessageForStatus(status));
+                return;
+            }
+
+            parseStreamResponse(conn, emitter);
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
         }
+    }
 
-        int status = conn.getResponseCode();
-        if (status != 200) {
-            String errorBody = readErrorBody(conn);
-            log.error("DeepSeek API error {}: {}", status, errorBody);
-            sendError(emitter, "AI 服务返回错误 (HTTP " + status + ")");
-            return;
-        }
-
-        parseStreamResponse(conn, emitter);
+    private String errorMessageForStatus(int status) {
+        return switch (status) {
+            case 401 -> "API Key 无效，请检查 DEEPSEEK_API_KEY 配置";
+            case 429 -> "请求过于频繁，请稍后重试";
+            case 500, 502, 503 -> "AI 服务暂时不可用，请稍后重试";
+            default -> "AI 服务返回错误 (HTTP " + status + ")";
+        };
     }
 
     private void parseStreamResponse(HttpURLConnection conn, SseEmitter emitter) throws Exception {
         StringBuilder contentBuffer = new StringBuilder();
         List<ReviewIssue> allIssues = new ArrayList<>();
-        int parseOffset = 0; // Track where we last finished parsing
+        int parseOffset = 0;
 
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
@@ -131,8 +167,6 @@ public class ReviewServiceImpl implements ReviewService {
                             if (contentNode != null && !contentNode.isNull()) {
                                 String content = contentNode.asText();
                                 contentBuffer.append(content);
-
-                                // Only scan new content since last parse position
                                 parseOffset = extractNewIssues(contentBuffer, parseOffset, emitter, allIssues);
                             }
                         }
@@ -145,7 +179,6 @@ public class ReviewServiceImpl implements ReviewService {
             }
         }
 
-        // Final pass: try to parse any remaining content
         extractNewIssues(contentBuffer, parseOffset, emitter, allIssues);
 
         int total = allIssues.size();
@@ -174,9 +207,7 @@ public class ReviewServiceImpl implements ReviewService {
         String content = buffer.toString();
         if (parseOffset >= content.length()) return parseOffset;
 
-        // Find the JSON array wrapper, but only search from parseOffset
         int arrayStart = content.indexOf('[', parseOffset);
-        // If no [ found in new content, check if there was one earlier
         if (arrayStart < 0) {
             arrayStart = content.indexOf('[');
             if (arrayStart < 0 || arrayStart >= parseOffset) return parseOffset;
@@ -194,7 +225,7 @@ public class ReviewServiceImpl implements ReviewService {
             if (objStart < 0) return lastParsedEnd;
 
             int objEnd = findClosingBrace(content, objStart);
-            if (objEnd < 0) return lastParsedEnd; // Object not yet complete
+            if (objEnd < 0) return lastParsedEnd;
 
             String objJson = content.substring(objStart, objEnd + 1);
             try {
@@ -296,8 +327,8 @@ public class ReviewServiceImpl implements ReviewService {
             Map.of("role", "system", "content", systemPrompt),
             Map.of("role", "user", "content", contentDescription + "\n\n" + code)
         ));
-        body.put("temperature", 0.3);
-        body.put("max_tokens", 8192);
+        body.put("temperature", temperature);
+        body.put("max_tokens", maxTokens);
 
         return objectMapper.writeValueAsString(body);
     }
@@ -338,5 +369,13 @@ public class ReviewServiceImpl implements ReviewService {
         } catch (Exception e) {
             return "(unable to read error body)";
         }
+    }
+
+    private void safeComplete(SseEmitter emitter) {
+        try { emitter.complete(); } catch (Exception ignored) {}
+    }
+
+    private void safeCompleteWithError(SseEmitter emitter, Throwable e) {
+        try { emitter.completeWithError(e); } catch (Exception ignored) {}
     }
 }

@@ -18,7 +18,7 @@
       <el-button
         type="primary"
         size="large"
-        :disabled="!content.trim()"
+        :disabled="!canSubmit"
         :loading="loading"
         @click="handleReview"
       >
@@ -42,6 +42,8 @@ defineProps<{
 const inputMode = ref<'code' | 'diff'>('code')
 const content = ref('')
 
+const canSubmit = computed(() => content.value.trim().length > 0)
+
 const placeholder = computed(() =>
   inputMode.value === 'diff'
     ? '请粘贴 git diff 内容...'
@@ -49,7 +51,7 @@ const placeholder = computed(() =>
 )
 
 function handleReview() {
-  if (!content.value.trim()) return
+  if (!canSubmit.value) return
   emit('review', content.value, inputMode.value)
 }
 </script>

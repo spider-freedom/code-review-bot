@@ -38,6 +38,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { useReviewStore } from '@/stores/review'
+import { formatTime } from '@/utils/format'
 import DiffViewer from '@/components/DiffViewer.vue'
 import CodeHighlight from '@/components/CodeHighlight.vue'
 import ReviewReport from '@/components/ReviewReport.vue'
@@ -50,12 +51,6 @@ const record = computed(() => store.historyById(route.params.id as string))
 
 function goBack() {
   router.push({ name: 'history' })
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 </script>
 

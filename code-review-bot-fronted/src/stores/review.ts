@@ -46,7 +46,14 @@ export const useReviewStore = defineStore('review', () => {
   })
 
   // ---- actions ----
+  let generation = 0
+  let abortCurrent: (() => void) | null = null
+
   function startReview(code: string, mode: 'code' | 'diff'): { abort: () => void } {
+    // Abort any in-flight stream
+    abortCurrent?.()
+    generation++
+
     diffContent.value = code
     currentCode.value = code
     currentMode.value = mode
@@ -55,12 +62,16 @@ export const useReviewStore = defineStore('review', () => {
     streamIssues.value = []
     streamSummary.value = ''
 
+    const gen = generation
+
     const ctrl = reviewCodeStream(code, mode, {
       onIssue(issue) {
+        if (generation !== gen) return // Stale callback from previous review
         if (status.value === 'loading') status.value = 'streaming'
-        streamIssues.value = [...streamIssues.value, issue]
+        streamIssues.value.push(issue)
       },
       onDone(summary) {
+        if (generation !== gen) return
         currentResult.value = {
           issues: [...streamIssues.value],
           summary,
@@ -73,12 +84,20 @@ export const useReviewStore = defineStore('review', () => {
         )
       },
       onError(err) {
+        if (generation !== gen) return
         console.error('审查失败:', err)
         status.value = 'error'
       },
     })
 
+    abortCurrent = ctrl.abort
     return ctrl
+  }
+
+  function stopReview() {
+    abortCurrent?.()
+    abortCurrent = null
+    status.value = 'idle'
   }
 
   function addIssue(issue: ReviewIssue) {
@@ -134,6 +153,7 @@ export const useReviewStore = defineStore('review', () => {
     historyById,
     // actions
     startReview,
+    stopReview,
     addIssue,
     finishReview,
     saveToHistory,

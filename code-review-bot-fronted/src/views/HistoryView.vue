@@ -55,8 +55,10 @@
 
 <script setup lang="ts">
 import { FolderOpened } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useReviewStore } from '@/stores/review'
+import { formatTime } from '@/utils/format'
 import type { HistoryRecord } from '@/types/review'
 
 const store = useReviewStore()
@@ -66,18 +68,21 @@ function errorCount(row: HistoryRecord): number {
   return row.result.issues.filter((i) => i.severity === 'error').length
 }
 
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
 function viewDetail(id: string) {
   router.push({ name: 'review-detail', params: { id } })
 }
 
-function handleDelete(id: string) {
-  store.deleteHistory(id)
+async function handleDelete(id: string) {
+  try {
+    await ElMessageBox.confirm('确定要删除这条审查记录吗？', '确认删除', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+    })
+    store.deleteHistory(id)
+  } catch {
+    // user cancelled
+  }
 }
 </script>
 

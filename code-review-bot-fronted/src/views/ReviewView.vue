@@ -29,9 +29,9 @@
         <p>AI 将逐行分析您的代码，发现潜在问题并提供修改建议。</p>
       </div>
 
-      <!-- Loading: initial analysis -->
+      <!-- Loading: initial analysis (also covers streaming before first issue arrives) -->
       <div
-        v-if="store.status === 'loading' && store.streamIssues.length === 0"
+        v-if="(store.status === 'loading' || store.status === 'streaming') && store.streamIssues.length === 0"
         class="state-card state-card--loading"
       >
         <el-icon class="loading-icon is-loading"><Loading /></el-icon>

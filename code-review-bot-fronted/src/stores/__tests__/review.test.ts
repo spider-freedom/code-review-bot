@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useReviewStore } from '@/stores/review'
+import { reviewCodeStream } from '@/api/review'
 import type { ReviewIssue, HistoryRecord } from '@/types/review'
 
 vi.mock('@/api/review', () => ({
@@ -184,5 +185,36 @@ describe('useReviewStore', () => {
     const store = createStore()
     expect(store.history).toHaveLength(1)
     expect(store.history[0].code).toBe('old code')
+  })
+
+  it('startReview 正确重置状态并变为 loading', () => {
+    const mockAbort = vi.fn()
+    vi.mocked(reviewCodeStream).mockReturnValue({ abort: mockAbort })
+
+    const store = createStore()
+    // Set some prior state
+    store.addIssue(sampleIssue)
+    store.finishReview('prior')
+    expect(store.status).toBe('done')
+
+    const { abort } = store.startReview('test code', 'code')
+    expect(store.status).toBe('loading')
+    expect(store.currentResult).toBeNull()
+    expect(store.streamIssues).toEqual([])
+    expect(store.currentCode).toBe('test code')
+    expect(store.currentMode).toBe('code')
+    expect(typeof abort).toBe('function')
+  })
+
+  it('stopReview 调用 abort 并重置状态', () => {
+    const mockAbort = vi.fn()
+    vi.mocked(reviewCodeStream).mockReturnValue({ abort: mockAbort })
+
+    const store = createStore()
+    store.startReview('test', 'code')
+
+    store.stopReview()
+    expect(mockAbort).toHaveBeenCalledTimes(1)
+    expect(store.status).toBe('idle')
   })
 })

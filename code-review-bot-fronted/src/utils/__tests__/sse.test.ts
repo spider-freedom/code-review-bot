@@ -202,4 +202,67 @@ describe('createSSEStream', () => {
     expect(onChunk).toHaveBeenCalledTimes(1)
     expect(onChunk).toHaveBeenCalledWith({ type: 'issue', text: 'only' })
   })
+
+  it('三块分片的 SSE 数据正确拼接', async () => {
+    const onChunk = vi.fn()
+    const onDone = vi.fn()
+    const onError = vi.fn()
+
+    const response = createMockResponse([
+      'data: {"type"',
+      ':"issue","text"',
+      ':"triple split"}\n\n',
+    ])
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response)
+
+    createSSEStream<TestChunk>('/api/test', { code: 'test' }, { onChunk, onDone, onError })
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
+    expect(onChunk).toHaveBeenCalledTimes(1)
+    expect(onChunk).toHaveBeenCalledWith({ type: 'issue', text: 'triple split' })
+  })
+
+  it('data 行无有效 JSON 内容时不触发 onChunk', async () => {
+    const onChunk = vi.fn()
+    const onDone = vi.fn()
+    const onError = vi.fn()
+
+    const response = createMockResponse([
+      'data: \n\n',
+      'data: {"type":"issue","text":"after blank"}\n\n',
+    ])
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response)
+
+    createSSEStream<TestChunk>('/api/test', { code: 'test' }, { onChunk, onDone, onError })
+
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
+    expect(onChunk).toHaveBeenCalledTimes(1)
+    expect(onChunk).toHaveBeenCalledWith({ type: 'issue', text: 'after blank' })
+  })
+
+  it('超时触发 onError', async () => {
+    // Temporarily override the default timeout for fast test
+    const origTimeout = globalThis.setTimeout
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn: any, ms?: number) => {
+      if (ms === 5 * 60 * 1000) {
+        // Immediately invoke the timeout callback for testing
+        fn()
+        return 1 as any
+      }
+      return origTimeout(fn, ms)
+    })
+
+    const onChunk = vi.fn()
+    const onDone = vi.fn()
+    const onError = vi.fn()
+
+    // Create a response that never resolves
+    const neverResolve = new Promise(() => {}) as any
+    vi.spyOn(globalThis, 'fetch').mockReturnValue(neverResolve)
+
+    createSSEStream<TestChunk>('/api/test', { code: 'test' }, { onChunk, onDone, onError })
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1))
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('超时') }))
+  })
 })

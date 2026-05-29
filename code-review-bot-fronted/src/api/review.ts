@@ -13,6 +13,17 @@ interface SSEChunk {
   message?: string
 }
 
+function toReviewIssue(chunk: SSEChunk): ReviewIssue {
+  return {
+    severity: (chunk.severity as ReviewIssue['severity']) || 'info',
+    line: chunk.line ?? 0,
+    title: chunk.title ?? '',
+    description: chunk.description ?? '',
+    suggestion: chunk.suggestion ?? '',
+    codeExample: chunk.codeExample,
+  }
+}
+
 export function reviewCodeStream(
   code: string,
   mode: 'code' | 'diff',
@@ -29,14 +40,7 @@ export function reviewCodeStream(
       onChunk(chunk) {
         switch (chunk.type) {
           case 'issue':
-            callbacks.onIssue({
-              severity: (chunk.severity as ReviewIssue['severity']) || 'info',
-              line: chunk.line ?? 0,
-              title: chunk.title ?? '',
-              description: chunk.description ?? '',
-              suggestion: chunk.suggestion ?? '',
-              codeExample: chunk.codeExample,
-            })
+            callbacks.onIssue(toReviewIssue(chunk))
             break
           case 'done':
             callbacks.onDone(chunk.summary ?? '审查完成')
