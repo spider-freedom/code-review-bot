@@ -1,152 +1,149 @@
 # Code Review Bot
 
-AI-driven automated code review tool. Paste code snippets or Git diffs, and the AI analyzes your code in real time, streaming issues as it finds them.
+AI 驱动的自动化代码审查工具。粘贴代码片段或 Git Diff，AI 会实时分析代码并以流式方式逐一输出问题。
 
-## Tech Stack
+## 技术栈
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Vue 3, TypeScript, Vite 6, Element Plus, Pinia, Vue Router 4 |
-| Backend | Spring Boot 3.5, Java 17, Maven |
-| AI | DeepSeek API (OpenAI-compatible chat completions, streaming) |
-| Testing | Vitest, @vue/test-utils, JUnit 5 |
+| 层级 | 技术 |
+|------|------|
+| 前端 | Vue 3、TypeScript、Vite 6、Element Plus、Pinia、Vue Router 4 |
+| 后端 | Spring Boot 3.5、Java 17、Maven |
+| AI | DeepSeek API（OpenAI 兼容的流式聊天补全） |
+| 测试 | Vitest、@vue/test-utils、JUnit 5 |
 
-## Project Structure
+## 项目结构
 
 ```
 code-review-bot/
-├── code-review-bot-fronted/    # Vue 3 + TypeScript frontend
+├── code-review-bot-fronted/    # Vue 3 + TypeScript 前端
 │   ├── src/
-│   │   ├── api/                # API layer (SSE streaming client)
-│   │   ├── components/         # CodeInput, DiffViewer, IssueCard, ReviewReport, etc.
-│   │   ├── layouts/            # MainLayout (header + nav)
-│   │   ├── router/             # Vue Router 4 routes
-│   │   ├── stores/             # Pinia store (review state, history persistence)
-│   │   ├── types/              # TypeScript type definitions
-│   │   ├── utils/              # SSE stream utility
-│   │   └── views/              # ReviewView, HistoryView, ReviewDetail
-│   └── vite.config.ts          # Vite config with /api proxy
-├── code-review-bot-backend/    # Spring Boot 3 backend
+│   │   ├── api/                # API 层（SSE 流式客户端）
+│   │   ├── components/         # CodeInput、DiffViewer、IssueCard、ReviewReport 等组件
+│   │   ├── layouts/            # 主布局（顶栏 + 导航）
+│   │   ├── router/             # Vue Router 4 路由
+│   │   ├── stores/             # Pinia 状态管理（审查状态、历史记录持久化）
+│   │   ├── types/              # TypeScript 类型定义
+│   │   ├── utils/              # SSE 流式工具
+│   │   └── views/              # ReviewView、HistoryView、ReviewDetail 页面
+│   └── vite.config.ts          # Vite 配置（含 /api 代理）
+├── code-review-bot-backend/    # Spring Boot 3 后端
 │   ├── src/main/java/com/codereviewbot/
-│   │   ├── config/             # CORS configuration
-│   │   ├── controller/         # POST /api/review (SSE endpoint)
-│   │   ├── dto/                # ReviewRequest, ReviewIssue
-│   │   └── service/impl/       # ReviewServiceImpl (DeepSeek integration)
-│   └── src/main/resources/     # application.yml, application-dev.yml
+│   │   ├── config/             # CORS 跨域配置
+│   │   ├── controller/         # POST /api/review（SSE 端点）
+│   │   ├── dto/                # ReviewRequest、ReviewIssue 数据传输对象
+│   │   └── service/impl/       # ReviewServiceImpl（DeepSeek 集成）
+│   └── src/main/resources/     # application.yml、application-dev.yml
 └── .gitignore
 ```
 
-## Architecture
+## 架构
 
 ```
-Browser (Vue 3)                    Spring Boot 3                    DeepSeek API
+浏览器 (Vue 3)                    Spring Boot 3                    DeepSeek API
 ┌──────────────┐    POST /api/review    ┌──────────────┐    POST /chat/completions   ┌──────────────┐
-│  fetch +     │ ──── SSE stream ────▶  │  SseEmitter   │ ──── stream: true ───────▶ │  DeepSeek    │
-│  ReadableStream │ ◀── data: {...}\n\n │  (streaming)  │ ◀── data: {...}\n\n       │  LLM         │
+│  fetch +     │ ──── SSE 流 ────────▶  │  SseEmitter   │ ──── stream: true ───────▶ │  DeepSeek    │
+│  ReadableStream │ ◀── data: {...}\n\n │  (流式转发)    │ ◀── data: {...}\n\n       │  大模型       │
 └──────────────┘                       └──────────────┘                             └──────────────┘
 ```
 
-1. Frontend sends a POST request with `{ code, mode }` (mode: `"code"` or `"diff"`)
-2. Backend forwards the code to DeepSeek API with a structured review prompt, requesting JSON output
-3. DeepSeek streams chunks back via SSE; backend extracts and forwards individual issue JSON objects
-4. Frontend renders issues in real time as they arrive
+1. 前端发送 POST 请求，携带 `{ code, mode }`（mode: `"code"` 或 `"diff"`）
+2. 后端将代码连同结构化审查提示词一起转发给 DeepSeek API，要求返回 JSON 格式结果
+3. DeepSeek 通过 SSE 流式返回数据块；后端实时提取每个已完成的 JSON 审查条目并转发给前端
+4. 前端随收到随渲染，用户可实时看到审查结果
 
-## Setup
+## 环境准备
 
-### Prerequisites
+- **Java 17+** 和 Maven 3.8+
+- **Node.js 18+** 和 npm
+- **DeepSeek API Key**（[platform.deepseek.com](https://platform.deepseek.com)）
 
-- **Java 17+** and Maven 3.8+
-- **Node.js 18+** and npm
-- **DeepSeek API key** ([platform.deepseek.com](https://platform.deepseek.com))
-
-### Backend
+## 后端启动
 
 ```bash
 cd code-review-bot-backend
 
-# Set your API key (or add to application-dev.yml)
+# 设置 API Key（也可配置在 application-dev.yml 中）
 export DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
 
-# Run the Spring Boot application
+# 启动 Spring Boot
 mvn spring-boot:run
 ```
 
-The backend starts on **http://localhost:8080**. The endpoint `POST /api/review` returns an SSE stream.
+后端运行在 **http://localhost:8080**，端点 `POST /api/review` 返回 SSE 流。
 
-**Important:** Set `DEEPSEEK_API_KEY` as an environment variable. Never hardcode the key in application-dev.yml.
+> 请通过环境变量 `DEEPSEEK_API_KEY` 配置密钥，不要硬编码在 `application-dev.yml` 中。
 
-### Frontend
+## 前端启动
 
 ```bash
 cd code-review-bot-fronted
 
-# Install dependencies
+# 安装依赖
 npm install
 
-# Start dev server
+# 启动开发服务器
 npm run dev
 ```
 
-The frontend starts on **http://localhost:3000**. Vite proxies `/api/*` to `localhost:8080`.
+前端运行在 **http://localhost:3000**，Vite 自动将 `/api/*` 请求代理到 `localhost:8080`。
 
-### API Key Configuration
+## API Key 配置优先级
 
-The backend reads the API key in this order:
-1. Environment variable: `DEEPSEEK_API_KEY`
-2. Default value in `application-dev.yml` (placeholder: `your-api-key-here`)
+1. 环境变量：`DEEPSEEK_API_KEY`
+2. `application-dev.yml` 中的默认值（占位符：`your-api-key-here`）
 
-## Usage
+## 使用说明
 
-1. Open http://localhost:3000
-2. Choose **Code Snippet** or **Git Diff** mode via the tabs
-3. Paste your code into the editor
-4. Click **开始审查** (Start Review)
-5. Issues stream in real time on the right panel, grouped by severity:
-   - **error** (red) — bugs, security vulnerabilities
-   - **warning** (yellow) — potential issues, best practice violations
-   - **info** (blue) — optimization suggestions
-6. Each issue card includes a description, suggestion, and code fix example
-7. Review history is saved locally and accessible via the **历史记录** tab
+1. 打开 http://localhost:3000
+2. 通过页签选择「代码片段」或「Git Diff」模式
+3. 将代码粘贴到编辑器中
+4. 点击「开始审查」
+5. 右侧面板实时流式展示问题，按严重程度分组：
+   - **error**（红色）— Bug、安全漏洞等严重缺陷
+   - **warning**（黄色）— 潜在隐患或违反最佳实践
+   - **info**（蓝色）— 优化建议，代码可正常运行但可改进
+6. 每个问题卡片包含：问题描述、修改建议、修复代码示例
+7. 审查历史保存在浏览器本地，可通过「历史记录」页签查看
 
-## What the AI Checks
+## AI 审查维度
 
-The review prompt instructs the model to analyze:
+审查提示词引导模型从以下四个方面分析代码：
 
-- **Bug risks** — null pointers, unhandled exceptions, edge cases, logic errors
-- **Security** — injection risks, sensitive data exposure, missing validation
-- **Performance** — unnecessary loops, unreleased resources, inefficient algorithms
-- **Code quality** — naming conventions, hardcoded values, duplication, complexity
+- **潜在 Bug** — 空指针、未处理异常、边界条件、逻辑错误
+- **安全漏洞** — 注入风险、敏感信息泄露、权限校验缺失
+- **性能问题** — 冗余循环、资源未释放、低效算法
+- **代码规范** — 命名不当、硬编码、重复代码、过度复杂
 
-## Scripts
+## 可用命令
 
-### Frontend
+### 前端
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Vite dev server |
-| `npm run build` | Type-check and production build |
-| `npm run preview` | Preview production build |
-| `npm test` | Run Vitest unit tests |
-| `npm run test:watch` | Run tests in watch mode |
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 启动 Vite 开发服务器 |
+| `npm run build` | 类型检查 + 生产构建 |
+| `npm run preview` | 预览生产构建结果 |
+| `npm test` | 运行 Vitest 单元测试 |
+| `npm run test:watch` | 监听模式运行测试 |
 
-### Backend
+### 后端
 
-| Command | Description |
-|---------|-------------|
-| `mvn spring-boot:run` | Start Spring Boot |
-| `mvn clean compile` | Compile the project |
-| `mvn test` | Run JUnit tests |
+| 命令 | 说明 |
+|------|------|
+| `mvn spring-boot:run` | 启动 Spring Boot |
+| `mvn clean compile` | 编译项目 |
+| `mvn test` | 运行 JUnit 测试 |
 
-## Testing
+## 测试
 
-- **Frontend:** 25 test cases across 3 test files (Pinia store, SSE stream parsing, DiffViewer rendering)
-- **Backend:** JUnit 5 integration tests (Spring Boot Test starter included)
+- **前端：** 25 个测试用例，覆盖 3 个模块（Pinia store、SSE 流解析、DiffViewer 渲染）
+- **后端：** JUnit 5 集成测试框架（spring-boot-starter-test 已引入）
 
 ```bash
-# Frontend tests
+# 前端测试
 cd code-review-bot-fronted && npm test
 
-# Backend tests
+# 后端测试
 cd code-review-bot-backend && mvn test
 ```
 
