@@ -4,7 +4,7 @@ export interface SSEStreamCallbacks<T> {
   onError: (error: Error) => void
 }
 
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
 
 export function createSSEStream<T>(
   url: string,
@@ -23,7 +23,7 @@ export function createSSEStream<T>(
 
   timeoutId = setTimeout(() => {
     controller.abort()
-    callbacks.onError(new Error('请求超时，服务器响应时间过长'))
+    callbacks.onError(new Error('请求超时'))
   }, DEFAULT_TIMEOUT_MS)
 
   fetch(url, {
@@ -49,45 +49,34 @@ export function createSSEStream<T>(
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
+        // CRLF → LF (HTTP chunked encoding uses \r\n)
+        buffer = buffer.replace(/\r\n/g, '\n')
+
         const parts = buffer.split('\n\n')
+        // Keep last (incomplete) part in buffer
         buffer = parts.pop() ?? ''
 
         for (const part of parts) {
           const trimmed = part.trim()
           if (!trimmed) continue
 
-          const lines = trimmed.split('\n')
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const jsonStr = line.slice(6)
-              try {
-                const data = JSON.parse(jsonStr) as T
-                callbacks.onChunk(data)
-              } catch {
-                if (import.meta.env.DEV) {
-                  console.warn('SSE parse error:', jsonStr)
-                }
-              }
+          for (const line of trimmed.split('\n')) {
+            const jsonStr = extractDataPayload(line)
+            if (jsonStr) {
+              tryParsePayload(jsonStr, callbacks.onChunk)
             }
           }
         }
       }
 
-      // Flush the decoder (handle final multi-byte UTF-8 character)
+      // Final flush: remaining decoder buffer
       buffer += decoder.decode()
+      buffer = buffer.replace(/\r\n/g, '\n')
       if (buffer.trim()) {
-        const lines = buffer.trim().split('\n')
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6)
-            try {
-              const data = JSON.parse(jsonStr) as T
-              callbacks.onChunk(data)
-            } catch {
-              if (import.meta.env.DEV) {
-                console.warn('SSE parse error (final flush):', jsonStr)
-              }
-            }
+        for (const line of buffer.trim().split('\n')) {
+          const jsonStr = extractDataPayload(line)
+          if (jsonStr) {
+            tryParsePayload(jsonStr, callbacks.onChunk)
           }
         }
       }
@@ -107,5 +96,25 @@ export function createSSEStream<T>(
       clearTimer()
       controller.abort()
     },
+  }
+}
+
+/** Extract JSON payload from a "data:" SSE line. Handles both "data:{json}" (Spring) and "data: {json}" (spec). */
+function extractDataPayload(line: string): string | null {
+  if (!line.startsWith('data:')) return null
+  let payload = line.substring(5) // after "data:"
+  if (payload.startsWith(' ')) payload = payload.substring(1)
+  if (!payload) return null
+  return payload
+}
+
+function tryParsePayload<T>(jsonStr: string, onChunk: (data: T) => void) {
+  try {
+    const data = JSON.parse(jsonStr) as T
+    onChunk(data)
+  } catch {
+    if (import.meta.env.DEV) {
+      console.warn('SSE parse error:', jsonStr.slice(0, 200))
+    }
   }
 }
