@@ -1,0 +1,15 @@
+{
+  "buildCommand": "cd code-review-bot-fronted && npm install && npm run build",
+  "outputDirectory": "code-review-bot-fronted/dist",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ]
+}
