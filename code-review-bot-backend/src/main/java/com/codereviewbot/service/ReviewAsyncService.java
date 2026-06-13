@@ -115,28 +115,39 @@ public class ReviewAsyncService {
 
         try {
             String cacheKey = "review:result:" + task.getCodeHash();
-
-            // 1. Check Redis cache
-            String cachedJson = redisTemplate.opsForValue().get(cacheKey);
             List<ReviewIssue> issues;
-            if (cachedJson != null) {
-                log.info("Cache hit for task {}", task.getTaskId());
-                issues = parseIssuesFromJson(cachedJson);
-                saveIssues(task.getTaskId(), issues);
-                task.setErrorMessage("hit_cache");
-            } else {
-                // 2. Call DeepSeek API
-                String resultJson = callDeepSeekApi(task);
-                issues = parseIssuesFromJson(resultJson);
-                saveIssues(task.getTaskId(), issues);
+            boolean cacheHit = false;
 
-                // 3. Cache result (1 hour TTL)
-                String json = objectMapper.writeValueAsString(issues);
-                redisTemplate.opsForValue().set(cacheKey, json, Duration.ofHours(1));
-                task.setErrorMessage("fresh");
+            // 1. Check Redis cache (gracefully degrade if Redis unavailable)
+            try {
+                String cachedJson = redisTemplate.opsForValue().get(cacheKey);
+                if (cachedJson != null) {
+                    log.info("Cache hit for task {}", task.getTaskId());
+                    issues = parseIssuesFromJson(cachedJson);
+                    cacheHit = true;
+                } else {
+                    issues = callAndParse(task);
+                }
+            } catch (Exception redisEx) {
+                log.warn("Redis unavailable, falling back to API call: {}", redisEx.getMessage());
+                issues = callAndParse(task);
+            }
+
+            // 2. Save results
+            saveIssues(task.getTaskId(), issues);
+
+            // 3. Try cache result (silently ignore if Redis unavailable)
+            if (!cacheHit) {
+                try {
+                    String json = objectMapper.writeValueAsString(issues);
+                    redisTemplate.opsForValue().set(cacheKey, json, Duration.ofHours(1));
+                } catch (Exception redisEx) {
+                    log.debug("Failed to cache result (Redis unavailable): {}", redisEx.getMessage());
+                }
             }
 
             task.setStatus("COMPLETED");
+            task.setErrorMessage(cacheHit ? "hit_cache" : "fresh");
             log.info("Task {} completed: {} issues ({})", task.getTaskId(), issues.size(), task.getErrorMessage());
         } catch (Exception e) {
             log.error("Task {} failed: {}", task.getTaskId(), e.getMessage());
@@ -149,6 +160,12 @@ public class ReviewAsyncService {
     }
 
     // ── DeepSeek API ────────────────────────────────────────────────────────
+
+    /** Call DeepSeek API and parse the response into ReviewIssue list. */
+    private List<ReviewIssue> callAndParse(ReviewTask task) throws Exception {
+        String raw = callDeepSeekApi(task);
+        return parseIssuesFromJson(raw);
+    }
 
     private String callDeepSeekApi(ReviewTask task) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) URI.create(apiUrl).toURL().openConnection();
