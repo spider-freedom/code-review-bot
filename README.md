@@ -22,11 +22,14 @@
 | 特性 | 说明 |
 |------|------|
 | 🤖 **AI 智能审查** | 基于 DeepSeek 大模型，覆盖 Bug、安全、性能、代码规范四大维度 |
-| 📡 **SSE 流式输出** | 服务端推送（Server-Sent Events）实时传输，逐条渲染审查结果 |
+| 📡 **SSE 流式输出** | 服务端推送实时传输，逐条渲染审查结果 |
+| 🔄 **异步提交模式** | 提交后轮询结果，可离开页面稍后查看，不依赖长连接 |
+| ⚡ **结果缓存** | 相同代码 1h 内重复审查直接返回缓存，减少 80% API 调用 |
 | 🔀 **双模式输入** | 支持粘贴代码片段和 Git Diff 两种输入方式 |
 | 📊 **问题分级** | 按严重程度分为 **严重**（红色）、**建议**（黄色）、**优化**（蓝色） |
 | 💡 **可执行建议** | 每个问题附有描述、修改建议和代码修复示例 |
 | 📝 **审查历史** | 所有审查记录自动保存至浏览器本地，支持查看和删除 |
+| 👥 **多租户隔离** | X-User-Id 请求头区分用户，审查历史/任务互相隔离 |
 | 🎨 **现代 UI** | Vue 3 + Element Plus 构建，响应式布局，深色代码编辑器 |
 | 🔒 **隐私优先** | API Key 通过环境变量配置，绝不硬编码或上传 |
 
@@ -70,6 +73,19 @@
 
 ---
 
+## 🏛️ 后端架构亮点
+
+| 特性 | 描述 | 技术实现 |
+|------|------|----------|
+| 🔄 **异步审查架构** | 代码提交后立即返回 taskId，后台线程池处理，前端轮询 | 线程池 + `review_task` 表持久化 |
+| ⚡ **结果缓存** | 相同代码 MD5 一小时内的重复审查命中缓存 | Redis + MD5 hash |
+| 👥 **多租户隔离** | X-User-Id 请求头提取用户标识，所有数据按用户隔离 | `ApiKeyFilter` + SQL WHERE |
+| 🚦 **限流保护** | 每用户每分钟最多 5 次审查，超限返回 429 | Guava RateLimiter |
+| 🔌 **优雅停机** | 20s 超时确保进行中审查任务完成 | `server.shutdown=graceful` |
+| ❤️ **健康检查** | Actuator `/actuator/health` 含 H2 + Redis 连通性 | Spring Boot Actuator |
+
+---
+
 ## 🛠️ 技术栈
 
 | 层级 | 技术 | 版本 |
@@ -84,7 +100,10 @@
 | 后端框架 | Spring Boot | 3.5 |
 | 运行环境 | Java | 17 |
 | 构建工具 | Maven | 3.8+ |
+| 数据库 | H2 (嵌入式) + MyBatis-Plus | 3.5.7 |
+| 缓存 | Redis (Lettuce) | - |
 | AI 模型 | DeepSeek API | OpenAI 兼容 |
+| 限流 | Guava RateLimiter | 33.0 |
 | 前端测试 | Vitest + @vue/test-utils | 3.x |
 | 后端测试 | JUnit 5 | - |
 
@@ -114,9 +133,12 @@ code-review-bot/
 ├── code-review-bot-backend/          # Spring Boot 3 后端
 │   ├── src/main/java/com/codereviewbot/
 │   │   ├── config/                   # CORS 跨域配置
-│   │   ├── controller/               # POST /api/review（SSE 端点）
-│   │   ├── dto/                      # ReviewRequest、ReviewIssue 数据传输对象
-│   │   └── service/impl/             # ReviewServiceImpl（DeepSeek 集成）
+│   │   ├── controller/               # ReviewController（SSE + 异步提交）
+│   │   ├── dto/                      # ReviewRequest、ReviewTaskResponse
+│   │   ├── entity/                   # ReviewTask、ReviewIssue（MyBatis-Plus 实体）
+│   │   ├── filter/                   # ApiKeyFilter（多租户隔离）
+│   │   ├── mapper/                   # MyBatis-Plus Mapper 接口
+│   │   └── service/                  # ReviewService + ReviewAsyncService
 │   └── src/main/resources/           # application.yml、application-dev.yml
 ├── screenshots/                      # 项目截图
 ├── .github/                          # GitHub Actions CI/CD
@@ -126,23 +148,45 @@ code-review-bot/
 ## 📐 系统架构
 
 ```
-┌─────────────────┐     POST /api/review     ┌─────────────────┐     POST /chat/completions    ┌─────────────────┐
-│                 │ ──── SSE ReadableStream ▶ │                 │ ──── stream: true ──────────▶ │                 │
-│  Vue 3 前端     │                           │  Spring Boot 3  │                                │  DeepSeek API   │
-│  (Vite 代理)    │ ◀── data: {...}\n\n ──── │  (SseEmitter)   │ ◀── data: {...}\n\n ──────── │  (Chat Model)   │
-│                 │                           │                 │                                │                 │
-└─────────────────┘                           └─────────────────┘                                └─────────────────┘
-  localhost:3000                                 localhost:8080                                   api.deepseek.com
+                           ┌── SSE 实时流式模式 (POST /api/review/stream) ──┐
+                           │                                                 ▼
+┌─────────────────┐        │  ┌─────────────────┐     POST /chat/completions    ┌─────────────────┐
+│                 │ ───────┘  │                 │ ──── stream: true ──────────▶ │                 │
+│  Vue 3 前端     │           │  Spring Boot 3  │                                │  DeepSeek API   │
+│  (Vite 代理)    │           │  (SseEmitter)   │ ◀── data: {...}\n\n ──────── │  (Chat Model)   │
+│                 │           │                 │                                │                 │
+└─────────────────┘           └─────────────────┘                                └─────────────────┘
+  localhost:3000                 localhost:8080                                   api.deepseek.com
+
+                           ┌── 异步提交模式 (POST /api/review/submit) ──┐
+                           │                                             ▼
+┌─────────────────┐        │  ┌─────────────────┐    ┌─────────────────┐
+│                 │ ───────┘  │  ReviewTask 表   │    │  DeepSeek API   │
+│  Vue 3 前端     │  poll /2s │  (H2 持久化)     │    │  (Chat Model)   │
+│                 │ ────────▶ │  PENDING→        │───▶│                 │
+│                 │ ◀──────── │  PROCESSING→     │◀───│                 │
+│                 │  taskId   │  COMPLETED       │    │                 │
+└─────────────────┘           └─────────────────┘    └─────────────────┘
+                                     │
+                              ┌──────┴──────┐
+                              │  Redis 缓存  │
+                              │  (MD5 去重)  │
+                              └─────────────┘
 ```
 
-**数据流程：**
+**数据流程（异步模式）：**
 
-1. **前端** → 用户粘贴代码/Diff，通过 `fetch` 发起 POST 请求（`Content-Type: application/json`）
-2. **后端** → 接收代码，组装结构化审查提示词（含四个审查维度），向 DeepSeek API 发起流式请求
-3. **DeepSeek** → 通过 SSE 流式返回 JSON 格式的审查条目（`data: {...}\n\n`）
-4. **后端转发** → 实时提取每个已完成的 JSON 对象，通过 Spring `SseEmitter` 透传给前端
-5. **前端渲染** → SSE `ReadableStream` 逐条解析，每收到一个问题立即渲染为卡片
-6. **本地持久化** → 审查完成后自动保存至 `localStorage`，可通过「历史记录」查看
+1. **提交** → 用户粘贴代码 → `POST /api/review/submit` → 后端保存 `review_task` 记录，立即返回 `taskId`
+2. **后台处理** → 线程池异步调用 DeepSeek API → 结果保存到 `review_issue` 表 → 更新任务状态为 `COMPLETED`
+3. **缓存检查** → 每次处理前先查 Redis（key=MD5(code)），命中则跳过 API 调用，返回缓存结果
+4. **前端轮询** → 每 2 秒 `GET /api/review/tasks/{taskId}` → 状态变为 `COMPLETED` 后获取 issues
+
+**数据流程（流式模式）：**
+
+1. **前端** → 通过 `fetch` 发起 POST 请求（`Content-Type: application/json`）
+2. **后端** → 向 DeepSeek API 发起流式请求，Spring `SseEmitter` 实时转发
+3. **前端渲染** → `ReadableStream` 逐条解析，每收到一个问题立即渲染为卡片
+4. **本地持久化** → 审查完成后自动保存至 `localStorage`
 
 ## 🚀 快速启动
 
