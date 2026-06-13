@@ -2,8 +2,20 @@
   <div class="review-view">
     <!-- Left Panel: Input + Diff -->
     <div class="panel panel--left">
+      <div class="mode-toggle">
+        <el-switch
+          v-model="useAsyncMode"
+          active-text="异步提交"
+          inactive-text="实时流式"
+          size="small"
+        />
+        <span class="mode-hint">
+          {{ useAsyncMode ? '提交后轮询结果，可离开页面' : 'SSE 实时流式返回，需保持连接' }}
+        </span>
+      </div>
       <CodeInput
-        :loading="store.status === 'loading' || store.status === 'streaming'"
+        :loading="store.status === 'loading' || store.status === 'streaming'
+              || store.status === 'async_pending' || store.status === 'async_processing'"
         @review="handleReview"
       />
 
@@ -16,6 +28,17 @@
 
     <!-- Right Panel: Results / States -->
     <div class="panel panel--right">
+      <!-- Async state: pending / processing -->
+      <div v-if="store.status === 'async_pending' || store.status === 'async_processing'" class="state-card state-card--loading">
+        <el-icon class="loading-icon is-loading"><Loading /></el-icon>
+        <p class="state-title">
+          {{ store.status === 'async_pending' ? '已提交审查任务' : 'AI 正在后台审查...' }}
+        </p>
+        <p class="state-desc">
+          {{ store.status === 'async_pending' ? '任务已入队，即将开始处理' : '轮询中，每 2 秒检查一次任务状态。您可以离开本页面稍后回来查看。' }}
+        </p>
+      </div>
+
       <!-- Idle: Getting started guide -->
       <div v-if="store.status === 'idle'" class="guide-card">
         <div class="guide-icon">
@@ -70,6 +93,9 @@ import type { ReviewResult } from '@/types/review'
 
 const store = useReviewStore()
 
+/** Toggle between SSE streaming (real-time) and async (submit + poll) modes */
+const useAsyncMode = ref(false)
+
 const liveResult = computed<ReviewResult>(() => {
   if (store.currentResult) return store.currentResult
   return {
@@ -82,15 +108,25 @@ const currentAbort = ref<(() => void) | null>(null)
 
 function handleReview(content: string, mode: 'code' | 'diff') {
   currentAbort.value?.()
-  const { abort } = store.startReview(content, mode)
-  currentAbort.value = abort
+  store.stopAsyncPolling()
+  if (useAsyncMode.value) {
+    store.startAsyncReview(content, mode)
+  } else {
+    const { abort } = store.startReview(content, mode)
+    currentAbort.value = abort
+  }
 }
 
 function retryReview() {
   if (store.currentCode) {
     currentAbort.value?.()
-    const { abort } = store.startReview(store.currentCode, store.currentMode)
-    currentAbort.value = abort
+    store.stopAsyncPolling()
+    if (useAsyncMode.value) {
+      store.startAsyncReview(store.currentCode, store.currentMode)
+    } else {
+      const { abort } = store.startReview(store.currentCode, store.currentMode)
+      currentAbort.value = abort
+    }
   }
 }
 </script>
@@ -122,6 +158,21 @@ function retryReview() {
 
 .diff-section {
   margin-top: 0;
+}
+
+/* Mode toggle */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.mode-hint {
+  font-size: 12px;
+  color: #909399;
 }
 
 /* Guide card */

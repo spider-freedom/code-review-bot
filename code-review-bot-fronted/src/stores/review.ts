@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ReviewIssue, ReviewResult, ReviewStatus, HistoryRecord } from '@/types/review'
-import { reviewCodeStream } from '@/api/review'
+import { reviewCodeStream, submitReview, getTaskStatus, getTaskIssues } from '@/api/review'
 
 const HISTORY_KEY = 'code-review-history'
 const MAX_HISTORY = 50
@@ -137,6 +137,63 @@ export const useReviewStore = defineStore('review', () => {
     currentMode.value = 'code'
   }
 
+  // ── Async submit + poll mode ───────────────────────────────────────────
+
+  let asyncPollTimer: ReturnType<typeof setInterval> | null = null
+
+  async function startAsyncReview(code: string, mode: 'code' | 'diff') {
+    // Clean up previous poll
+    if (asyncPollTimer) { clearInterval(asyncPollTimer); asyncPollTimer = null }
+
+    currentCode.value = code
+    currentMode.value = mode
+    diffContent.value = code
+    status.value = 'async_pending'
+    currentResult.value = null
+    streamIssues.value = []
+
+    try {
+      const { taskId } = await submitReview(code, mode)
+      status.value = 'async_processing'
+
+      // Poll every 2s until COMPLETED or FAILED
+      asyncPollTimer = setInterval(async () => {
+        try {
+          const task = await getTaskStatus(taskId)
+          if (task.status === 'COMPLETED') {
+            clearInterval(asyncPollTimer!)
+            asyncPollTimer = null
+            const issues = await getTaskIssues(taskId)
+            currentResult.value = {
+              issues,
+              summary: `审查完成，共发现 ${issues.length} 个问题`,
+            }
+            status.value = 'done'
+            saveToHistory(currentResult.value, currentCode.value, currentMode.value)
+          } else if (task.status === 'FAILED') {
+            clearInterval(asyncPollTimer!)
+            asyncPollTimer = null
+            status.value = 'error'
+            console.error('Async review failed:', task.errorMessage)
+          }
+        } catch (err) {
+          // Retry on next poll
+          console.warn('Poll error:', err)
+        }
+      }, 2000)
+    } catch (err) {
+      status.value = 'error'
+      console.error('Async review submit failed:', err)
+    }
+  }
+
+  function stopAsyncPolling() {
+    if (asyncPollTimer) {
+      clearInterval(asyncPollTimer)
+      asyncPollTimer = null
+    }
+  }
+
   return {
     // state
     currentResult,
@@ -159,5 +216,8 @@ export const useReviewStore = defineStore('review', () => {
     saveToHistory,
     deleteHistory,
     clearCurrentReview,
+    // async
+    startAsyncReview,
+    stopAsyncPolling,
   }
 })

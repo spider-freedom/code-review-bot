@@ -12,7 +12,15 @@ export interface ReviewResult {
   summary: string
 }
 
-export type ReviewStatus = 'idle' | 'loading' | 'streaming' | 'done' | 'error'
+export type ReviewStatus = 'idle' | 'loading' | 'streaming' | 'done' | 'error' | 'async_pending' | 'async_processing'
+
+export interface ReviewTaskResponse {
+  taskId: string
+  status: string
+  errorMessage?: string
+  createTime: string
+  updateTime: string
+}
 
 export interface HistoryRecord {
   id: string
