@@ -1,10 +1,24 @@
 server:
   port: 8080
+  shutdown: graceful
   tomcat:
     max-http-form-post-size: 64KB
+    connection-timeout: 30000
 
 spring:
   application:
     name: code-review-bot
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
   profiles:
     active: dev
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: when-authorized

@@ -4,6 +4,12 @@ spring:
     url: jdbc:h2:file:./data/review-bot;AUTO_SERVER=TRUE
     username: sa
     password:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      connection-timeout: 10000
   h2:
     console:
       enabled: false
