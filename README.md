@@ -4,16 +4,72 @@
 
 **后端驱动的 AI 代码审查服务 — 异步架构 · Redis 缓存 · 多租户 · 限流**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Vue 3](https://img.shields.io/badge/Vue-3.5-4fc08d?logo=vue.js)](https://vuejs.org/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6db33f?logo=springboot)](https://spring.io/projects/spring-boot)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178c6?logo=typescript)](https://www.typescriptlang.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6db33f?logo=springboot)](https://spring.io/)
 [![Java](https://img.shields.io/badge/Java-17-ed8b00?logo=openjdk)](https://openjdk.org/)
+[![Vue 3](https://img.shields.io/badge/Vue-3.5-4fc08d?logo=vue.js)](https://vuejs.org/)
 [![DeepSeek](https://img.shields.io/badge/AI-DeepSeek-6366f1)](https://platform.deepseek.com/)
-
-*粘贴代码片段或 Git Diff，AI 实时分析并以流式方式逐一输出审查结果*
+[![Redis](https://img.shields.io/badge/Cache-Redis-dc382d?logo=redis)](https://redis.io/)
+[![H2](https://img.shields.io/badge/DB-H2-0072b8)](https://www.h2database.com/)
+[![Guava](https://img.shields.io/badge/RateLimit-Guava-4285f4?logo=google)](https://github.com/google/guava)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
+
+---
+
+## 🏛️ 后端架构亮点（面试重点）
+
+| 特性 | 描述 | 技术实现 |
+|------|------|----------|
+| 🔄 **异步审查架构** | 提交后立即返回 taskId，线程池后台调 AI，结果持久化，前端轮询 | 线程池 + `review_task` 表 + `NoteParseTask` |
+| ⚡ **结果缓存** | 相同代码 MD5 1h 内命中缓存，跳过 API 调用，减少约 80% 成本 | Redis + MD5 hash |
+| 🛡️ **Redis 降级** | 缓存不可用时自动 fallback 到直接调 API，不阻塞业务 | try-catch 双路径 |
+| 👥 **多租户隔离** | X-User-Id 请求头提取用户标识，SQL 层自动注入过滤条件 | `ApiKeyFilter` + WHERE user_id |
+| 🚦 **限流保护** | 单用户每分钟 5 次审查，令牌桶算法，超限 HTTP 429 | `@RateLimit` + AOP + Guava |
+| 📝 **统一日志** | AOP 记录每个请求的方法/URI/耗时，慢请求 >3s 告警 | `WebLogAspect` |
+| 🛑 **全局异常处理** | 8 种异常统一捕获，结构化 JSON 响应 | `@RestControllerAdvice` + `ApiResponse` |
+| ✅ **启动校验** | 启动时检测 `DEEPSEEK_API_KEY` 配置，缺失直接报错 | `@PostConstruct` |
+| ⚙️ **工程规范** | HikariCP 连接池 + 优雅停机 + Actuator 健康检查 | H2 · `server.shutdown=graceful` |
+
+---
+
+## 📸 项目截图
+
+### 代码审查 — 异步提交 + 实时流式双模式
+
+![审查输入](screenshots/review-input.png)
+
+*左侧粘贴代码片段或 Git Diff，顶部切换异步提交 / SSE 实时流式模式*
+
+### 审查结果 — 流式渲染
+
+![审查结果](screenshots/review-results.png)
+
+*右侧面板实时流式展示审查结果，按严重程度（严重/建议/优化）分组*
+
+### 问题详情 — 展开卡片
+
+![问题详情](screenshots/review-results-expanded.png)
+
+*点击卡片展开查看问题描述、修改建议和修复代码示例*
+
+### Git Diff 审查模式
+
+![Git Diff](screenshots/review-diff-input.png)
+
+*切换至「粘贴 Git Diff」模式，直接粘贴 `git diff` 输出进行变更审查*
+
+### 历史记录
+
+![历史记录](screenshots/history-with-data.png)
+
+*审查历史自动保存在本地，支持查看详情和删除*
+
+### 详情回看
+
+![审查详情](screenshots/review-detail.png)
+
+*点击历史记录中的「查看」回顾完整审查结果*
 
 ---
 
@@ -21,350 +77,116 @@
 
 | 特性 | 说明 |
 |------|------|
-| 🤖 **AI 智能审查** | 基于 DeepSeek 大模型，覆盖 Bug、安全、性能、代码规范四大维度 |
-| 📡 **SSE 流式输出** | 服务端推送实时传输，逐条渲染审查结果 |
-| 🔄 **异步提交模式** | 提交后轮询结果，可离开页面稍后查看，不依赖长连接 |
-| ⚡ **结果缓存** | 相同代码 1h 内重复审查直接返回缓存，减少 80% API 调用 |
-| 🔀 **双模式输入** | 支持粘贴代码片段和 Git Diff 两种输入方式 |
-| 📊 **问题分级** | 按严重程度分为 **严重**（红色）、**建议**（黄色）、**优化**（蓝色） |
-| 💡 **可执行建议** | 每个问题附有描述、修改建议和代码修复示例 |
-| 📝 **审查历史** | 所有审查记录自动保存至浏览器本地，支持查看和删除 |
-| 👥 **多租户隔离** | X-User-Id 请求头区分用户，审查历史/任务互相隔离 |
-| 🎨 **现代 UI** | Vue 3 + Element Plus 构建，响应式布局，深色代码编辑器 |
-| 🔒 **隐私优先** | API Key 通过环境变量配置，绝不硬编码或上传 |
-
-## 📸 项目截图
-
-### 代码审查 — 输入页面
-
-![代码审查输入](screenshots/review-input.png)
-
-*左侧粘贴代码片段或 Git Diff，支持两种输入模式切换*
-
-### 代码审查 — 结果展示
-
-![审查结果](screenshots/review-results.png)
-
-*右侧面板实时流式展示审查结果，按严重程度分组排列*
-
-### 问题详情 — 展开卡片
-
-![问题详情展开](screenshots/review-results-expanded.png)
-
-*点击问题卡片展开详情，查看问题描述、修改建议和代码修复示例*
-
-### Git Diff 审查模式
-
-![Git Diff 输入](screenshots/review-diff-input.png)
-
-*切换到「粘贴 Git Diff」模式，直接粘贴 `git diff` 输出进行审查*
-
-### 审查历史记录
-
-![历史记录](screenshots/history-with-data.png)
-
-*所有审查记录保存在本地，支持查看详情和删除操作*
-
-### 审查详情回看
-
-![审查详情](screenshots/review-detail.png)
-
-*点击历史记录中的「查看」按钮，回顾完整的审查结果*
-
----
-
-## 🏛️ 后端架构亮点
-
-| 特性 | 描述 | 技术实现 |
-|------|------|----------|
-| 🔄 **异步审查架构** | 代码提交后立即返回 taskId，后台线程池处理，前端轮询 | 线程池 + `review_task` 表持久化 |
-| ⚡ **结果缓存** | 相同代码 MD5 一小时内的重复审查命中缓存 | Redis + MD5 hash |
-| 👥 **多租户隔离** | X-User-Id 请求头提取用户标识，所有数据按用户隔离 | `ApiKeyFilter` + SQL WHERE |
-| 🚦 **限流保护** | 每用户每分钟最多 5 次审查，超限返回 429 | Guava RateLimiter |
-| 🔌 **优雅停机** | 20s 超时确保进行中审查任务完成 | `server.shutdown=graceful` |
-| ❤️ **健康检查** | Actuator `/actuator/health` 含 H2 + Redis 连通性 | Spring Boot Actuator |
+| 🤖 **AI 智能审查** | DeepSeek 大模型，覆盖 Bug、安全、性能、代码规范四大维度 |
+| 🔄 **异步提交模式** | 提交后返回 taskId，每 2s 轮询状态，可离开页面 |
+| 📡 **SSE 流式模式** | 实时逐条渲染审查结果，适合快速预览 |
+| ⚡ **结果缓存** | 相同代码 1h 内直接返回缓存，零 API 消耗 |
+| 🔀 **双模式输入** | 粘贴代码片段 / Git Diff 两种输入 |
+| 📊 **三级问题分级** | error（红色）/ warning（黄色）/ info（蓝色）|
+| 👥 **多租户隔离** | 不同用户的审查历史和任务互相隔离 |
+| 📝 **审查历史** | 自动保存至本地，支持回看和删除 |
+| 🔒 **隐私优先** | API Key 环境变量配置，不硬编码 |
 
 ---
 
 ## 🛠️ 技术栈
 
-| 层级 | 技术 | 版本 |
-|------|------|------|
-| 前端框架 | Vue 3 (Composition API) | 3.5 |
-| 类型系统 | TypeScript | 5.6 |
-| 构建工具 | Vite | 6.x |
-| UI 组件库 | Element Plus | 2.9 |
-| 状态管理 | Pinia | 2.2 |
-| 路由 | Vue Router | 4.4 |
-| 代码高亮 | highlight.js | 11.x |
-| 后端框架 | Spring Boot | 3.5 |
-| 运行环境 | Java | 17 |
-| 构建工具 | Maven | 3.8+ |
-| 数据库 | H2 (嵌入式) + MyBatis-Plus | 3.5.7 |
-| 缓存 | Redis (Lettuce) | - |
-| AI 模型 | DeepSeek API | OpenAI 兼容 |
-| 限流 | Guava RateLimiter | 33.0 |
-| 前端测试 | Vitest + @vue/test-utils | 3.x |
-| 后端测试 | JUnit 5 | - |
+| 层级 | 技术 |
+|------|------|
+| **后端** | Spring Boot 3.5 · Java 17 · MyBatis-Plus 3.5.7 · Maven |
+| **数据库** | H2（嵌入式）· `review_task` + `review_issue` 两张核心表 |
+| **缓存** | Redis 7.x（Lettuce）· MD5 去重 key |
+| **AI** | DeepSeek API（OpenAI 兼容接口）· 流式 + 非流式双模式 |
+| **限流** | Guava RateLimiter · AOP 注解 · per-user 令牌桶 |
+| **监控** | Actuator 健康检查 · AOP 统一日志 |
+| **前端** | Vue 3 · TypeScript · Vite · Element Plus · Pinia |
+| **测试** | JUnit 5 + Mockito（11 后端用例）· Vitest（30 前端用例） |
 
-## 🏗️ 项目结构
-
-```
-code-review-bot/
-├── code-review-bot-fronted/          # Vue 3 + TypeScript 前端
-│   ├── src/
-│   │   ├── api/                      # API 层（fetch + SSE 流式客户端）
-│   │   ├── components/               # Vue 组件
-│   │   │   ├── CodeInput.vue         # 代码输入面板（模式切换 + 编辑器）
-│   │   │   ├── DiffViewer.vue        # Git Diff 可视化渲染器
-│   │   │   ├── IssueCard.vue         # 可展开的问题卡片
-│   │   │   ├── ReviewReport.vue      # 审查报告（分组 + 统计）
-│   │   │   └── CodeHighlight.vue     # 语法高亮展示
-│   │   ├── layouts/                  # MainLayout（顶栏 + 导航）
-│   │   ├── router/                   # Vue Router 4 路由配置
-│   │   ├── stores/                   # Pinia 状态管理（审查 + 历史持久化）
-│   │   ├── types/                    # TypeScript 类型定义
-│   │   ├── utils/                    # SSE 解析、格式化工具
-│   │   └── views/                    # 页面组件
-│   │       ├── ReviewView.vue        # 审查主页面（双栏布局）
-│   │       ├── HistoryView.vue       # 历史记录列表
-│   │       └── ReviewDetail.vue      # 审查详情回看
-│   └── vite.config.ts                # Vite 配置（含 /api 反向代理）
-├── code-review-bot-backend/          # Spring Boot 3 后端
-│   ├── src/main/java/com/codereviewbot/
-│   │   ├── config/                   # CORS 跨域配置
-│   │   ├── controller/               # ReviewController（SSE + 异步提交）
-│   │   ├── dto/                      # ReviewRequest、ReviewTaskResponse
-│   │   ├── entity/                   # ReviewTask、ReviewIssue（MyBatis-Plus 实体）
-│   │   ├── filter/                   # ApiKeyFilter（多租户隔离）
-│   │   ├── mapper/                   # MyBatis-Plus Mapper 接口
-│   │   └── service/                  # ReviewService + ReviewAsyncService
-│   └── src/main/resources/           # application.yml、application-dev.yml
-├── screenshots/                      # 项目截图
-├── .github/                          # GitHub Actions CI/CD
-└── .gitignore
-```
+---
 
 ## 📐 系统架构
 
 ```
-                           ┌── SSE 实时流式模式 (POST /api/review/stream) ──┐
-                           │                                                 ▼
-┌─────────────────┐        │  ┌─────────────────┐     POST /chat/completions    ┌─────────────────┐
-│                 │ ───────┘  │                 │ ──── stream: true ──────────▶ │                 │
-│  Vue 3 前端     │           │  Spring Boot 3  │                                │  DeepSeek API   │
-│  (Vite 代理)    │           │  (SseEmitter)   │ ◀── data: {...}\n\n ──────── │  (Chat Model)   │
-│                 │           │                 │                                │                 │
-└─────────────────┘           └─────────────────┘                                └─────────────────┘
-  localhost:3000                 localhost:8080                                   api.deepseek.com
-
-                           ┌── 异步提交模式 (POST /api/review/submit) ──┐
-                           │                                             ▼
-┌─────────────────┐        │  ┌─────────────────┐    ┌─────────────────┐
-│                 │ ───────┘  │  ReviewTask 表   │    │  DeepSeek API   │
-│  Vue 3 前端     │  poll /2s │  (H2 持久化)     │    │  (Chat Model)   │
-│                 │ ────────▶ │  PENDING→        │───▶│                 │
-│                 │ ◀──────── │  PROCESSING→     │◀───│                 │
-│                 │  taskId   │  COMPLETED       │    │                 │
-└─────────────────┘           └─────────────────┘    └─────────────────┘
-                                     │
-                              ┌──────┴──────┐
-                              │  Redis 缓存  │
-                              │  (MD5 去重)  │
-                              └─────────────┘
+                    ┌── SSE 实时流式 (POST /api/review/stream) ──┐
+                    │                                              ▼
+┌─────────────────┐ │  ┌──────────────────┐    ┌─────────────────┐
+│                 │ ┘  │  Spring Boot 3   │───▶│  DeepSeek API   │
+│  Vue 3 前端     │    │  SseEmitter      │◀───│  (stream:true)  │
+│  (Vite)         │    └──────────────────┘    └─────────────────┘
+└─────────────────┘
+                    ┌── 异步提交 (POST /api/review/submit) ──┐
+                    │                                         ▼
+┌─────────────────┐ │  ┌──────────┐  ┌──────────┐  ┌─────────────────┐
+│                 │ │  │ H2 DB    │  │ 线程池    │  │  DeepSeek API   │
+│  Vue 3 前端     │ ┘  │ task 表  │  │ (3 workers│─▶│  (stream:false) │
+│  poll /2s       │───▶│ PENDING→ │  │ 异步处理) │◀─│                 │
+│                 │◀───│ COMPLETED│  └──────────┘  └─────────────────┘
+└─────────────────┘    └────┬─────┘
+                            │
+                     ┌──────┴──────┐
+                     │  Redis 缓存  │
+                     │  (MD5 去重)  │
+                     │  1h TTL     │
+                     └─────────────┘
 ```
 
-**数据流程（异步模式）：**
-
-1. **提交** → 用户粘贴代码 → `POST /api/review/submit` → 后端保存 `review_task` 记录，立即返回 `taskId`
-2. **后台处理** → 线程池异步调用 DeepSeek API → 结果保存到 `review_issue` 表 → 更新任务状态为 `COMPLETED`
-3. **缓存检查** → 每次处理前先查 Redis（key=MD5(code)），命中则跳过 API 调用，返回缓存结果
-4. **前端轮询** → 每 2 秒 `GET /api/review/tasks/{taskId}` → 状态变为 `COMPLETED` 后获取 issues
-
-**数据流程（流式模式）：**
-
-1. **前端** → 通过 `fetch` 发起 POST 请求（`Content-Type: application/json`）
-2. **后端** → 向 DeepSeek API 发起流式请求，Spring `SseEmitter` 实时转发
-3. **前端渲染** → `ReadableStream` 逐条解析，每收到一个问题立即渲染为卡片
-4. **本地持久化** → 审查完成后自动保存至 `localStorage`
+---
 
 ## 🚀 快速启动
 
 ### 环境要求
 
-- **Java 17+** 和 Maven 3.8+
-- **Node.js 18+** 和 npm
-- **DeepSeek API Key** — [点击获取](https://platform.deepseek.com/api_keys)
+- Java 17+ · Maven 3.8+ · Node.js 18+
+- DeepSeek API Key — [获取](https://platform.deepseek.com/api_keys)
+- Redis 7.x（可选 — 不配置则审查结果不缓存，功能正常）
 
-### 1. 克隆仓库
+### 步骤
 
 ```bash
+# 1. 克隆
 git clone https://github.com/spider-freedom/code-review-bot.git
 cd code-review-bot
-```
 
-### 2. 启动后端
-
-```bash
+# 2. 后端
 cd code-review-bot-backend
-
-# 配置 API Key（推荐通过环境变量）
-# Windows PowerShell:
-$env:DEEPSEEK_API_KEY="sk-xxxxxxxxxxxxxxxx"
-# macOS / Linux:
-export DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
-
-# 启动 Spring Boot
+export DEEPSEEK_API_KEY=sk-xxxxxxxx
 mvn spring-boot:run
-```
+# → http://localhost:8080 · GET /actuator/health
 
-后端运行在 **http://localhost:8080**`GET /actuator/health` 可检查服务状态。
-
-> ⚠️ **安全提示：** 请通过环境变量 `DEEPSEEK_API_KEY` 配置密钥，不要将 API Key 硬编码在 `application-dev.yml` 中或提交到 Git。
-
-### 3. 启动前端
-
-```bash
+# 3. 前端（新终端）
 cd code-review-bot-fronted
-
-# 安装依赖
-npm install
-
-# 启动开发服务器
-npm run dev
+npm install && npm run dev
+# → http://localhost:3000
 ```
 
-前端运行在 **http://localhost:3000**，Vite 自动将 `/api/*` 请求代理到 `localhost:8080`。
-
-### 4. 开始审查
-
-1. 打开浏览器访问 http://localhost:3000
-2. 选择「粘贴代码片段」或「粘贴 Git Diff」模式
-3. 将代码粘贴到编辑器，点击「开始审查」
-4. 右侧面板实时流式展示审查结果，问题按严重程度分组
-5. 审查完成后可在「历史记录」页签查看和回顾
-
-## 🤖 AI 审查维度
-
-审查提示词引导 DeepSeek 大模型从以下四个维度分析代码：
-
-| 维度 | 严重级别 | 关注点 |
-|------|----------|--------|
-| 🔴 **潜在 Bug** | `error` | 空指针、未处理异常、资源泄漏、边界条件、逻辑错误、并发安全 |
-| 🔴 **安全漏洞** | `error` | SQL/XSS 注入、敏感信息泄露、权限校验缺失、会话管理缺陷 |
-| 🟡 **性能问题** | `warning` | 冗余循环、N+1 查询、资源未释放、低效算法、内存泄漏 |
-| 🔵 **代码规范** | `info` | 命名不当、硬编码常量、重复代码、函数过长、缺少类型 |
-
-## 📋 可用命令
-
-### 前端
-
-| 命令 | 说明 |
-|------|------|
-| `npm run dev` | 启动 Vite 开发服务器（HMR 热更新） |
-| `npm run build` | TypeScript 类型检查 + Vite 生产构建 |
-| `npm run preview` | 本地预览生产构建结果 |
-| `npm test` | 运行 Vitest 单元测试（单次） |
-| `npm run test:watch` | 监听模式运行测试 |
-
-### 后端
-
-| 命令 | 说明 |
-|------|------|
-| `mvn spring-boot:run` | 启动 Spring Boot（开发模式） |
-| `mvn clean compile` | 编译 Java 源码 |
-| `mvn test` | 运行 JUnit 5 测试 |
-| `mvn clean package -DskipTests` | 打包可执行 JAR |
+---
 
 ## 🧪 测试
 
-- **前端：** 30 个测试用例，覆盖 Pinia store、SSE 流解析、DiffViewer 组件渲染
-- **后端：** JUnit 5 集成测试框架（`spring-boot-starter-test`）
-
 ```bash
-# 前端测试
-cd code-review-bot-fronted && npm test
-
-# 后端测试
+# 后端（11 用例 — ReviewAsyncService 核心逻辑）
 cd code-review-bot-backend && mvn test
+
+# 前端（30 用例 — Store / SSE 解析 / 组件渲染）
+cd code-review-bot-fronted && npm test
 ```
 
-## 🚢 生产部署
+---
 
-### 构建
+## 🚢 部署
 
 ```bash
-# 前端构建
 cd code-review-bot-fronted && npm run build
-
-# 后端构建
 cd code-review-bot-backend && mvn clean package -DskipTests
 
-# 运行
 java -Dspring.profiles.active=prod \
      -DDEEPSEEK_API_KEY=sk-xxxxxxxx \
-     -jar code-review-bot-backend/target/code-review-bot-1.0.0.jar
+     -jar target/code-review-bot-1.0.0.jar
 ```
 
-### Nginx 反向代理
+> 生产部署需配置 Nginx 反向代理 + SPA fallback + SSE 长连接超时。详见 README 原部署章节。
 
-前端使用 `createWebHistory()` 路由模式，需配置 SPA fallback：
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    # 前端静态文件
-    root /var/www/code-review-bot/dist;
-    index index.html;
-
-    # SPA fallback
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    # 后端 API 代理
-    location /api/ {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Connection '';
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 3600s;  # SSE 长连接
-    }
-}
-```
-
-### 生产环境检查清单
-
-- [ ] 将 `application.yml` 的 Spring profile 改为 `prod`
-- [ ] 通过环境变量 `DEEPSEEK_API_KEY` 配置 API Key
-- [ ] 在 `application-prod.yml` 中配置具体的 `allowedOrigins` 替代 CORS 通配符
-- [ ] 配置反向代理（Nginx/Caddy）提供 HTTPS
-- [ ] 验证健康检查端点：`GET /actuator/health`
-
-## 🤝 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建功能分支：`git checkout -b feat/amazing-feature`
-3. 提交代码：`git commit -m 'feat: add amazing feature'`
-4. 推送分支：`git push origin feat/amazing-feature`
-5. 提交 Pull Request
-
-### 本地开发环境
-
-建议使用 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/) 规范编写提交信息：
-
-- `feat:` 新功能
-- `fix:` 修复 Bug
-- `docs:` 文档更新
-- `style:` 代码格式（不影响功能）
-- `refactor:` 重构
-- `test:` 测试相关
-- `chore:` 构建/工具变动
+---
 
 ## 📄 License
 
@@ -373,5 +195,5 @@ MIT © 2024 [spider-freedom](https://github.com/spider-freedom)
 ---
 
 <div align="center">
-  <sub>Built with ❤️ using Vue 3, Spring Boot, and DeepSeek AI</sub>
+  <sub>Built with Spring Boot, Vue 3, Redis, H2, and DeepSeek AI</sub>
 </div>
