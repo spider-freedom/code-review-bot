@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🔍 Code Review Bot
+# 🔍 代码分析服务平台
 
-**AI 驱动的自动化代码审查工具**
+**后端驱动的 AI 代码审查服务 — 异步架构 · Redis 缓存 · 多租户 · 限流**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-4fc08d?logo=vue.js)](https://vuejs.org/)
