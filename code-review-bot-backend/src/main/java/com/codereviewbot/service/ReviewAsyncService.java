@@ -28,6 +28,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
+
 /**
  * Async code review service.
  *
@@ -69,9 +71,16 @@ public class ReviewAsyncService {
         this.redisTemplate = redisTemplate;
     }
 
-    /**
-     * Submit review task — returns immediately.
-     */
+    @PostConstruct
+    void validateConfig() {
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                    "DEEPSEEK_API_KEY is not set. Configure it via environment variable or application-dev.yml");
+        }
+        log.info("ReviewAsyncService initialized — apiUrl={}, model={}, poolSize=3", apiUrl, model);
+    }
+
+    /** Submit review task — returns immediately. */
     public ReviewTask submit(String userId, String code, String mode) {
         String codeHash = md5(code);
         ReviewTask task = new ReviewTask();
@@ -97,12 +106,20 @@ public class ReviewAsyncService {
     }
 
     /**
-     * Query issues for a completed task.
+     * Query issues for a completed task, with pagination.
      */
-    public List<ReviewIssue> getIssues(String taskId) {
-        return issueMapper.selectList(
+    public List<ReviewIssue> getIssues(String taskId, int page, int size) {
+        return issueMapper.selectPage(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(page, size),
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ReviewIssue>()
-                        .eq(ReviewIssue::getTaskId, taskId));
+                        .eq(ReviewIssue::getTaskId, taskId)
+                        .orderByAsc(ReviewIssue::getSeverity)
+        ).getRecords();
+    }
+
+    /** Default: first page, 50 issues. */
+    public List<ReviewIssue> getIssues(String taskId) {
+        return getIssues(taskId, 1, 50);
     }
 
     // ── Processing ──────────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -68,10 +69,16 @@ public class ReviewController {
                 .build());
     }
 
-    /** Get completed review issues for a task. */
+    /**
+     * Get completed review issues for a task.
+     * Supports pagination via optional page/size query params.
+     */
     @GetMapping("/tasks/{taskId}/issues")
-    public ApiResponse<List<ReviewIssue>> getIssues(@PathVariable String taskId) {
-        return ApiResponse.ok(asyncService.getIssues(taskId));
+    public ApiResponse<List<ReviewIssue>> getIssues(
+            @PathVariable String taskId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return ApiResponse.ok(asyncService.getIssues(taskId, page, size));
     }
 
     // ── SSE streaming (real-time preview, kept for compatibility) ──────────
