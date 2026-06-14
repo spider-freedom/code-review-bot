@@ -1,19 +1,17 @@
 package com.codereviewbot.controller;
 
+import com.codereviewbot.common.ApiResponse;
+import com.codereviewbot.common.RateLimit;
 import com.codereviewbot.dto.ReviewRequest;
 import com.codereviewbot.dto.ReviewTaskResponse;
 import com.codereviewbot.entity.ReviewIssue;
 import com.codereviewbot.entity.ReviewTask;
 import com.codereviewbot.service.ReviewAsyncService;
 import com.codereviewbot.service.ReviewService;
-import com.google.common.util.concurrent.RateLimiter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import static org.springframework.http.HttpStatus.NOT_FOUND;
+import static org.springframework.http.HttpStatus.TOO_MANY_REQUESTS;
+
 @RestController
 @RequestMapping("/api/review")
 public class ReviewController {
@@ -31,67 +32,50 @@ public class ReviewController {
     private final ReviewService reviewService;
     private final ReviewAsyncService asyncService;
 
-    // Per-user rate limiters: 5 requests/minute per user
-    private final ConcurrentHashMap<String, RateLimiter> userLimiters = new ConcurrentHashMap<>();
-
     public ReviewController(ReviewService reviewService, ReviewAsyncService asyncService) {
         this.reviewService = reviewService;
         this.asyncService = asyncService;
     }
 
+    // ── Async submit + poll ────────────────────────────────────────────────
+
     /**
-     * Async submit — returns taskId immediately.
-     * Rate limited: 5 requests/min per user.
+     * Submit code review asynchronously. Returns taskId immediately.
+     * Rate limited: 5 requests/min per user (enforced by RateLimitAspect via annotation).
      */
+    @RateLimit(permits = 5, windowSeconds = 60, message = "请求过于频繁，每分钟最多 5 次审查")
     @PostMapping("/submit")
-    public Map<String, Object> submit(@Valid @RequestBody ReviewRequest request,
-                                       HttpServletRequest httpReq) {
+    public ApiResponse<Map<String, Object>> submit(@Valid @RequestBody ReviewRequest request,
+                                                    HttpServletRequest httpReq) {
         String userId = (String) httpReq.getAttribute("userId");
-        String code = request.getCode();
-        String mode = request.getMode();
-
-        // Rate limit check
-        RateLimiter limiter = userLimiters.computeIfAbsent(userId,
-                k -> RateLimiter.create(5.0 / 60.0));
-        if (!limiter.tryAcquire(1, TimeUnit.SECONDS)) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                    "请求过于频繁，每分钟最多 5 次审查");
-        }
-
-        ReviewTask task = asyncService.submit(userId, code, mode);
-        return Map.of("taskId", task.getTaskId(), "status", task.getStatus());
+        ReviewTask task = asyncService.submit(userId, request.getCode(), request.getMode());
+        return ApiResponse.ok(Map.of("taskId", task.getTaskId(), "status", task.getStatus()));
     }
 
-    /**
-     * Poll task status.
-     */
+    /** Poll async task status. */
     @GetMapping("/tasks/{taskId}")
-    public ReviewTaskResponse getTask(@PathVariable String taskId) {
+    public ApiResponse<ReviewTaskResponse> getTask(@PathVariable String taskId) {
         ReviewTask task = asyncService.getTask(taskId);
         if (task == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found");
+            throw new ResponseStatusException(NOT_FOUND, "任务不存在");
         }
-        return ReviewTaskResponse.builder()
+        return ApiResponse.ok(ReviewTaskResponse.builder()
                 .taskId(task.getTaskId())
                 .status(task.getStatus())
                 .errorMessage(task.getErrorMessage())
                 .createTime(task.getCreateTime())
                 .updateTime(task.getUpdateTime())
-                .build();
+                .build());
     }
 
-    /**
-     * Get completed review issues.
-     */
+    /** Get completed review issues for a task. */
     @GetMapping("/tasks/{taskId}/issues")
-    public List<ReviewIssue> getIssues(@PathVariable String taskId) {
-        return asyncService.getIssues(taskId);
+    public ApiResponse<List<ReviewIssue>> getIssues(@PathVariable String taskId) {
+        return ApiResponse.ok(asyncService.getIssues(taskId));
     }
 
-    /**
-     * Legacy SSE streaming endpoint — kept for real-time preview mode.
-     * Not rate-limited (it's self-limiting due to connection overhead).
-     */
+    // ── SSE streaming (real-time preview, kept for compatibility) ──────────
+
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter reviewStream(@Valid @RequestBody ReviewRequest request) {
         return reviewService.reviewStream(request);
