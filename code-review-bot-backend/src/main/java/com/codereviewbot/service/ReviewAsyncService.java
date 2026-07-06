@@ -4,31 +4,22 @@ import com.codereviewbot.entity.ReviewIssue;
 import com.codereviewbot.entity.ReviewTask;
 import com.codereviewbot.mapper.ReviewIssueMapper;
 import com.codereviewbot.mapper.ReviewTaskMapper;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 
 /**
  * Async code review service.
@@ -36,7 +27,8 @@ import jakarta.annotation.PostConstruct;
  * Design decisions:
  * - Thread pool (3 workers) for AI calls. Production: message queue (Kafka/RocketMQ).
  * - Redis cache by MD5(code) — 1h TTL — prevents re-reviewing identical code.
- * - Task state persisted to H2 (review_task table) for restart durability.
+ * - Task state persisted to review_task table for restart durability.
+ * - DeepSeekClient encapsulates AI API calls (replaced raw HttpURLConnection).
  */
 @Service
 public class ReviewAsyncService {
@@ -53,31 +45,22 @@ public class ReviewAsyncService {
     private final ReviewTaskMapper taskMapper;
     private final ReviewIssueMapper issueMapper;
     private final StringRedisTemplate redisTemplate;
-
-    @Value("${deepseek.api-url}")
-    private String apiUrl;
-
-    @Value("${deepseek.api-key}")
-    private String apiKey;
-
-    @Value("${deepseek.model}")
-    private String model;
+    private final DeepSeekClient deepSeekClient;
 
     public ReviewAsyncService(ReviewTaskMapper taskMapper,
                               ReviewIssueMapper issueMapper,
-                              StringRedisTemplate redisTemplate) {
+                              StringRedisTemplate redisTemplate,
+                              DeepSeekClient deepSeekClient) {
         this.taskMapper = taskMapper;
         this.issueMapper = issueMapper;
         this.redisTemplate = redisTemplate;
+        this.deepSeekClient = deepSeekClient;
     }
 
-    @PostConstruct
-    void validateConfig() {
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException(
-                    "DEEPSEEK_API_KEY is not set. Configure it via environment variable or application-dev.yml");
-        }
-        log.info("ReviewAsyncService initialized — apiUrl={}, model={}, poolSize=3", apiUrl, model);
+    @PreDestroy
+    void shutdown() {
+        log.info("Shutting down review executor pool");
+        executor.shutdown();
     }
 
     /** Submit review task — returns immediately. */
@@ -99,27 +82,32 @@ public class ReviewAsyncService {
     }
 
     /**
-     * Query task by ID.
+     * Query task by ID, scoped to user for tenant isolation.
      */
-    public ReviewTask getTask(String taskId) {
-        return taskMapper.selectById(taskId);
+    public ReviewTask getTask(String taskId, String userId) {
+        return taskMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ReviewTask>()
+                        .eq(ReviewTask::getTaskId, taskId)
+                        .eq(ReviewTask::getUserId, userId));
     }
 
     /**
-     * Query issues for a completed task, with pagination.
+     * Query issues for a completed task, scoped to user with pagination.
      */
-    public List<ReviewIssue> getIssues(String taskId, int page, int size) {
+    public List<ReviewIssue> getIssues(String taskId, String userId, int page, int size) {
+        ReviewTask task = taskMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ReviewTask>()
+                        .eq(ReviewTask::getTaskId, taskId)
+                        .eq(ReviewTask::getUserId, userId));
+        if (task == null) {
+            return List.of();
+        }
         return issueMapper.selectPage(
                 new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(page, size),
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ReviewIssue>()
                         .eq(ReviewIssue::getTaskId, taskId)
                         .orderByAsc(ReviewIssue::getSeverity)
         ).getRecords();
-    }
-
-    /** Default: first page, 50 issues. */
-    public List<ReviewIssue> getIssues(String taskId) {
-        return getIssues(taskId, 1, 50);
     }
 
     // ── Processing ──────────────────────────────────────────────────────────
@@ -176,40 +164,20 @@ public class ReviewAsyncService {
         taskMapper.updateById(task);
     }
 
-    // ── DeepSeek API ────────────────────────────────────────────────────────
+    // ── AI ──────────────────────────────────────────────────────────────────
 
-    /** Call DeepSeek API and parse the response into ReviewIssue list. */
-    private List<ReviewIssue> callAndParse(ReviewTask task) throws Exception {
-        String raw = callDeepSeekApi(task);
+    private List<ReviewIssue> callAndParse(ReviewTask task) {
+        String contentDescription = "code".equals(task.getMode())
+                ? "请审查以下代码：" : "请审查以下 git diff 内容：";
+
+        String systemPrompt = """
+            你是一个资深代码审查专家，请从以下维度分析：
+            1. 潜在Bug 2. 安全漏洞 3. 性能问题 4. 代码规范
+            严格返回 JSON 数组：[{"severity":"error|warning|info","line":数字,"title":"...","description":"...","suggestion":"...","codeExample":"..."}]
+            没有问题则返回 []。不要包含 markdown 标记。""";
+
+        String raw = deepSeekClient.chat(systemPrompt, contentDescription + "\n\n" + task.getCode());
         return parseIssuesFromJson(raw);
-    }
-
-    private String callDeepSeekApi(ReviewTask task) throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) URI.create(apiUrl).toURL().openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-        conn.setRequestProperty("Content-Type", "application/json");
-        conn.setDoOutput(true);
-        conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(300_000);
-        conn.setRequestProperty("Accept", "application/json");  // Non-streaming for async
-
-        String requestBody = buildRequestBody(task.getCode(), task.getMode(), false);
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(requestBody.getBytes(StandardCharsets.UTF_8));
-        }
-
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-            }
-        }
-
-        JsonNode root = objectMapper.readTree(sb.toString());
-        return root.get("choices").get(0).get("message").get("content").asText();
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -245,28 +213,6 @@ public class ReviewAsyncService {
                 .suggestion(node.has("suggestion") ? node.get("suggestion").asText() : "")
                 .codeExample(node.has("codeExample") ? node.get("codeExample").asText() : null)
                 .build();
-    }
-
-    private String buildRequestBody(String code, String mode, boolean stream) throws JsonProcessingException {
-        String contentDescription = "code".equals(mode)
-                ? "请审查以下代码：" : "请审查以下 git diff 内容：";
-
-        String systemPrompt = """
-            你是一个资深代码审查专家，请从以下维度分析：
-            1. 潜在Bug 2. 安全漏洞 3. 性能问题 4. 代码规范
-            严格返回 JSON 数组：[{"severity":"error|warning|info","line":数字,"title":"...","description":"...","suggestion":"...","codeExample":"..."}]
-            没有问题则返回 []。不要包含 markdown 标记。""";
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", model);
-        body.put("stream", stream);
-        body.put("messages", List.of(
-                Map.of("role", "system", "content", systemPrompt),
-                Map.of("role", "user", "content", contentDescription + "\n\n" + code)));
-        body.put("temperature", 0.3);
-        body.put("max_tokens", 8192);
-
-        return objectMapper.writeValueAsString(body);
     }
 
     private String md5(String input) {

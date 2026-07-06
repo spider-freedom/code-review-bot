@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -26,9 +27,9 @@ public class GlobalExceptionHandler {
     // ── HTTP 4xx ──────────────────────────────────────────────────────────
 
     @ExceptionHandler(ResponseStatusException.class)
-    @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
-    public ApiResponse<Void> handleResponseStatus(ResponseStatusException e) {
-        return ApiResponse.fail(e.getStatusCode().value(), e.getReason());
+    public ResponseEntity<ApiResponse<Void>> handleResponseStatus(ResponseStatusException e) {
+        return ResponseEntity.status(e.getStatusCode())
+                .body(ApiResponse.fail(e.getStatusCode().value(), e.getReason()));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

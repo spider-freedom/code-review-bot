@@ -24,7 +24,6 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
-import static org.springframework.http.HttpStatus.TOO_MANY_REQUESTS;
 
 @RestController
 @RequestMapping("/api/review")
@@ -55,8 +54,10 @@ public class ReviewController {
 
     /** Poll async task status. */
     @GetMapping("/tasks/{taskId}")
-    public ApiResponse<ReviewTaskResponse> getTask(@PathVariable String taskId) {
-        ReviewTask task = asyncService.getTask(taskId);
+    public ApiResponse<ReviewTaskResponse> getTask(@PathVariable String taskId,
+                                                   HttpServletRequest httpReq) {
+        String userId = (String) httpReq.getAttribute("userId");
+        ReviewTask task = asyncService.getTask(taskId, userId);
         if (task == null) {
             throw new ResponseStatusException(NOT_FOUND, "任务不存在");
         }
@@ -77,8 +78,10 @@ public class ReviewController {
     public ApiResponse<List<ReviewIssue>> getIssues(
             @PathVariable String taskId,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "50") int size) {
-        return ApiResponse.ok(asyncService.getIssues(taskId, page, size));
+            @RequestParam(defaultValue = "50") int size,
+            HttpServletRequest httpReq) {
+        String userId = (String) httpReq.getAttribute("userId");
+        return ApiResponse.ok(asyncService.getIssues(taskId, userId, page, size));
     }
 
     // ── SSE streaming (real-time preview, kept for compatibility) ──────────

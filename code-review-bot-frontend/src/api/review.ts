@@ -36,7 +36,7 @@ export function reviewCodeStream(
   },
 ): { abort: () => void } {
   return createSSEStream<SSEChunk>(
-    '/api/review',
+    '/api/review/stream',
     { code, mode },
     {
       onChunk(chunk) {

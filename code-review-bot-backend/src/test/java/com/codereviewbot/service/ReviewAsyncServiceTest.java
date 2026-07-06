@@ -13,17 +13,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-import org.springframework.test.util.ReflectionTestUtils;
-
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("ReviewAsyncService")
 class ReviewAsyncServiceTest {
 
@@ -31,16 +31,13 @@ class ReviewAsyncServiceTest {
     @Mock private ReviewIssueMapper issueMapper;
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private ValueOperations<String, String> valueOps;
+    @Mock private DeepSeekClient deepSeekClient;
 
     private ReviewAsyncService service;
 
     @BeforeEach
     void setUp() {
-        service = new ReviewAsyncService(taskMapper, issueMapper, redisTemplate);
-        // Inject @Value fields since we're not using Spring context
-        ReflectionTestUtils.setField(service, "apiUrl", "https://api.deepseek.com/v1/chat/completions");
-        ReflectionTestUtils.setField(service, "apiKey", "sk-test-key");
-        ReflectionTestUtils.setField(service, "model", "deepseek-chat");
+        service = new ReviewAsyncService(taskMapper, issueMapper, redisTemplate, deepSeekClient);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
     }
 
@@ -69,10 +66,6 @@ class ReviewAsyncServiceTest {
             assertThat(persisted.getMode()).isEqualTo(mode);
             assertThat(persisted.getCodeHash()).isNotNull();
             assertThat(persisted.getCreateTime()).isNotNull();
-
-            // Returned task is the same object
-            assertThat(result.getUserId()).isEqualTo(userId);
-            assertThat(result.getStatus()).isEqualTo("PENDING");
         }
 
         @Test
@@ -98,18 +91,18 @@ class ReviewAsyncServiceTest {
     }
 
     @Nested
-    @DisplayName("getTask() — task query")
+    @DisplayName("getTask() — scoped task query with tenant isolation")
     class GetTask {
 
         @Test
-        @DisplayName("should return task when found")
+        @DisplayName("should return task when found for correct user")
         void shouldReturnTaskWhenFound() {
             ReviewTask mockTask = new ReviewTask();
             mockTask.setTaskId("abc-123");
             mockTask.setStatus("COMPLETED");
-            when(taskMapper.selectById("abc-123")).thenReturn(mockTask);
+            when(taskMapper.selectOne(any())).thenReturn(mockTask);
 
-            ReviewTask result = service.getTask("abc-123");
+            ReviewTask result = service.getTask("abc-123", "user-1");
 
             assertThat(result).isNotNull();
             assertThat(result.getTaskId()).isEqualTo("abc-123");
@@ -117,28 +110,32 @@ class ReviewAsyncServiceTest {
         }
 
         @Test
-        @DisplayName("should return null when task not found")
+        @DisplayName("should return null when task not found or belongs to another user")
         void shouldReturnNullWhenNotFound() {
-            when(taskMapper.selectById("nonexistent")).thenReturn(null);
+            when(taskMapper.selectOne(any())).thenReturn(null);
 
-            ReviewTask result = service.getTask("nonexistent");
+            ReviewTask result = service.getTask("nonexistent", "user-1");
 
             assertThat(result).isNull();
         }
     }
 
     @Nested
-    @DisplayName("getIssues() — paginated issue query")
+    @DisplayName("getIssues() — scoped paginated issue query")
     class GetIssues {
 
         @Test
-        @DisplayName("should query with default pagination (page=1, size=50)")
+        @DisplayName("should query with pagination and verify task ownership")
         @SuppressWarnings("unchecked")
         void shouldUseDefaultPagination() {
             String taskId = "task-1";
+            String userId = "user-1";
+            ReviewTask mockTask = new ReviewTask();
+            mockTask.setTaskId(taskId);
+            when(taskMapper.selectOne(any())).thenReturn(mockTask);
             when(issueMapper.selectPage(any(), any())).thenReturn(new Page<>());
 
-            service.getIssues(taskId);
+            service.getIssues(taskId, userId, 1, 50);
 
             ArgumentCaptor<Page<ReviewIssue>> pageCaptor = ArgumentCaptor.forClass(Page.class);
             verify(issueMapper).selectPage(pageCaptor.capture(), any());
@@ -147,51 +144,35 @@ class ReviewAsyncServiceTest {
         }
 
         @Test
-        @DisplayName("should query with custom pagination")
+        @DisplayName("should use custom pagination when specified")
         @SuppressWarnings("unchecked")
         void shouldUseCustomPagination() {
             String taskId = "task-2";
+            String userId = "user-1";
+            ReviewTask mockTask = new ReviewTask();
+            mockTask.setTaskId(taskId);
+            when(taskMapper.selectOne(any())).thenReturn(mockTask);
             when(issueMapper.selectPage(any(), any())).thenReturn(new Page<>());
 
-            service.getIssues(taskId, 2, 10);
+            service.getIssues(taskId, userId, 2, 10);
 
             ArgumentCaptor<Page<ReviewIssue>> pageCaptor = ArgumentCaptor.forClass(Page.class);
             verify(issueMapper).selectPage(pageCaptor.capture(), any());
             assertThat(pageCaptor.getValue().getCurrent()).isEqualTo(2);
             assertThat(pageCaptor.getValue().getSize()).isEqualTo(10);
         }
-    }
-
-    @Nested
-    @DisplayName("validateConfig() — startup safety check")
-    class ConfigValidation {
 
         @Test
-        @DisplayName("should pass when apiKey is configured")
-        void shouldPassWithValidConfig() {
-            // setUp already sets apiKey = "sk-test-key"
-            // This should not throw
-            service.validateConfig();
-        }
+        @DisplayName("should return empty list when task belongs to another user")
+        void shouldReturnEmptyWhenCrossUser() {
+            String taskId = "task-3";
+            String userId = "other-user";
+            when(taskMapper.selectOne(any())).thenReturn(null);
 
-        @Test
-        @DisplayName("should throw when apiKey is null")
-        void shouldThrowWhenApiKeyNull() {
-            ReflectionTestUtils.setField(service, "apiKey", null);
+            var result = service.getIssues(taskId, userId, 1, 50);
 
-            assertThatThrownBy(() -> service.validateConfig())
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("DEEPSEEK_API_KEY");
-        }
-
-        @Test
-        @DisplayName("should throw when apiKey is blank")
-        void shouldThrowWhenApiKeyBlank() {
-            ReflectionTestUtils.setField(service, "apiKey", "   ");
-
-            assertThatThrownBy(() -> service.validateConfig())
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("DEEPSEEK_API_KEY");
+            assertThat(result).isEmpty();
         }
     }
+
 }

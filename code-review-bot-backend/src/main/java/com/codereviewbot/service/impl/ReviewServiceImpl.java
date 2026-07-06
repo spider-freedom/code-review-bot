@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -62,6 +63,12 @@ public class ReviewServiceImpl implements ReviewService {
             throw new IllegalStateException(
                 "DEEPSEEK_API_KEY is not set. Configure it via the environment variable or application-dev.yml");
         }
+    }
+
+    @PreDestroy
+    void shutdown() {
+        log.info("Shutting down review SSE executor pool");
+        executor.shutdown();
     }
 
     @Override

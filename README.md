@@ -8,9 +8,11 @@
 [![Java](https://img.shields.io/badge/Java-17-ed8b00?logo=openjdk)](https://openjdk.org/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-4fc08d?logo=vue.js)](https://vuejs.org/)
 [![DeepSeek](https://img.shields.io/badge/AI-DeepSeek-6366f1)](https://platform.deepseek.com/)
+[![MySQL](https://img.shields.io/badge/DB-MySQL-4479A1?logo=mysql)](https://www.mysql.com/)
 [![Redis](https://img.shields.io/badge/Cache-Redis-dc382d?logo=redis)](https://redis.io/)
-[![H2](https://img.shields.io/badge/DB-H2-0072b8)](https://www.h2database.com/)
-[![Guava](https://img.shields.io/badge/RateLimit-Guava-4285f4?logo=google)](https://github.com/google/guava)
+[![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker)](https://www.docker.com/)
+[![Flyway](https://img.shields.io/badge/Migration-Flyway-CC0200?logo=flyway)](https://flywaydb.org/)
+[![Swagger](https://img.shields.io/badge/API-Swagger-85EA2D?logo=swagger)](https://swagger.io/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -21,15 +23,18 @@
 
 | 特性 | 描述 | 技术实现 |
 |------|------|----------|
-| 🔄 **异步审查架构** | 提交后立即返回 taskId，线程池后台调 AI，结果持久化，前端轮询 | 线程池 + `review_task` 表 + `NoteParseTask` |
+| 🔗 **GitHub PR 自动审查** | Webhook 监听 PR 事件，自动拉取 diff、审查、回贴评论 | `WebhookController` + `GitHubClient` |
+| 🔄 **异步审查架构** | 提交后立即返回 taskId，线程池后台调 AI，结果持久化，前端轮询 | 线程池 + `review_task` 表 |
 | ⚡ **结果缓存** | 相同代码 MD5 1h 内命中缓存，跳过 API 调用，减少约 80% 成本 | Redis + MD5 hash |
 | 🛡️ **Redis 降级** | 缓存不可用时自动 fallback 到直接调 API，不阻塞业务 | try-catch 双路径 |
-| 👥 **多租户隔离** | X-User-Id 请求头提取用户标识，SQL 层自动注入过滤条件 | `ApiKeyFilter` + WHERE user_id |
+| 👥 **多租户隔离** | X-User-Id 请求头提取用户标识，查询强制带 userId 过滤 | `ApiKeyFilter` + LambdaQueryWrapper |
 | 🚦 **限流保护** | 单用户每分钟 5 次审查，令牌桶算法，超限 HTTP 429 | `@RateLimit` + AOP + Guava |
-| 📝 **统一日志** | AOP 记录每个请求的方法/URI/耗时，慢请求 >3s 告警 | `WebLogAspect` |
-| 🛑 **全局异常处理** | 8 种异常统一捕获，结构化 JSON 响应 | `@RestControllerAdvice` + `ApiResponse` |
-| ✅ **启动校验** | 启动时检测 `DEEPSEEK_API_KEY` 配置，缺失直接报错 | `@PostConstruct` |
-| ⚙️ **工程规范** | HikariCP 连接池 + 优雅停机 + Actuator 健康检查 | H2 · `server.shutdown=graceful` |
+| 🛑 **全局异常处理** | 9 种异常统一捕获，动态 HTTP 状态码 | `@RestControllerAdvice` + `ResponseEntity` |
+| 🧩 **DeepSeekClient 抽象** | AI API 调用统一封装，Spring RestClient 声明式 HTTP | `RestClient` + `DeepSeekClient` |
+| 🗄️ **数据库迁移** | Flyway 版本化 schema 管理，dev(H2 MySQL 模式) / prod(MySQL) | Flyway + H2 + MySQL |
+| 🐳 **Docker 部署** | MySQL + Redis 容器化，`docker compose up` 一键启动 | Docker Compose |
+| 📄 **API 文档** | Swagger UI 自动生成，`/swagger-ui.html` 在线调试 | SpringDoc OpenAPI 2.8 |
+| ⚙️ **工程规范** | HikariCP 连接池 + 优雅停机 + Graceful Shutdown + 线程池 PreDestroy | HikariCP · `@PreDestroy` · Actuator |
 
 ---
 
@@ -93,20 +98,34 @@
 
 | 层级 | 技术 |
 |------|------|
-| **后端** | Spring Boot 3.5 · Java 17 · MyBatis-Plus 3.5.7 · Maven |
-| **数据库** | H2（嵌入式）· `review_task` + `review_issue` 两张核心表 |
+| **后端** | Spring Boot 3.5 · Java 17 · MyBatis-Plus 3.5.7 · RestClient · Maven |
+| **数据库** | MySQL 8.0（生产）· H2 MySQL 模式（开发）· Flyway 迁移 |
 | **缓存** | Redis 7.x（Lettuce）· MD5 去重 key |
-| **AI** | DeepSeek API（OpenAI 兼容接口）· 流式 + 非流式双模式 |
+| **AI** | DeepSeek API（OpenAI 兼容接口）· `DeepSeekClient` 统一封装 · REST + SSE 双模式 |
+| **Webhook** | GitHub API · PR diff 拉取 · 审查结果自动回贴评论 |
 | **限流** | Guava RateLimiter · AOP 注解 · per-user 令牌桶 |
-| **监控** | Actuator 健康检查 · AOP 统一日志 |
+| **部署** | Docker Compose（MySQL + Redis）· Graceful Shutdown |
+| **文档** | SpringDoc OpenAPI 2.8 · Swagger UI |
 | **前端** | Vue 3 · TypeScript · Vite · Element Plus · Pinia |
-| **测试** | JUnit 5 + Mockito（11 后端用例）· Vitest（30 前端用例） |
+| **测试** | JUnit 5 + Mockito（8 后端用例）· Vitest（30 前端用例） |
 
 ---
 
 ## 📐 系统架构
 
 ```
+                         ┌── GitHub Webhook ──────────────────────────┐
+                         │  PR opened / label:review                  │
+                         │  POST /api/webhook/github                  │
+                         │         ▼                                  │
+                         │  ┌──────────────┐   ┌─────────────┐      │
+                         │  │ WebhookService│──▶│ GitHub API  │      │
+                         │  │ (异步审查)     │   │ (获取 diff)  │      │
+                         │  │              │◀──│ (发评论)     │      │
+                         │  └──────┬───────┘   └─────────────┘      │
+                         │         │                                   │
+                         └─────────┼───────────────────────────────────┘
+                                   │
                     ┌── SSE 实时流式 (POST /api/review/stream) ──┐
                     │                                              ▼
 ┌─────────────────┐ │  ┌──────────────────┐    ┌─────────────────┐
@@ -117,46 +136,59 @@
                     ┌── 异步提交 (POST /api/review/submit) ──┐
                     │                                         ▼
 ┌─────────────────┐ │  ┌──────────┐  ┌──────────┐  ┌─────────────────┐
-│                 │ │  │ H2 DB    │  │ 线程池    │  │  DeepSeek API   │
+│                 │ │  │ MySQL/H2 │  │ 线程池    │  │  DeepSeek API   │
 │  Vue 3 前端     │ ┘  │ task 表  │  │ (3 workers│─▶│  (stream:false) │
 │  poll /2s       │───▶│ PENDING→ │  │ 异步处理) │◀─│                 │
 │                 │◀───│ COMPLETED│  └──────────┘  └─────────────────┘
 └─────────────────┘    └────┬─────┘
                             │
-                     ┌──────┴──────┐
-                     │  Redis 缓存  │
-                     │  (MD5 去重)  │
-                     │  1h TTL     │
-                     └─────────────┘
+           ┌────────────────┼────────────────┐
+           │                                  │
+    ┌──────┴──────┐                   ┌──────┴──────┐
+    │  Redis 缓存  │                   │   Flyway    │
+    │  (MD5 去重)  │                   │  DB 迁移    │
+    │  1h TTL     │                   │  V1__init   │
+    └─────────────┘                   └─────────────┘
 ```
 
 ---
 
 ## 🚀 快速启动
 
-### 环境要求
-
-- Java 17+ · Maven 3.8+ · Node.js 18+
-- DeepSeek API Key — [获取](https://platform.deepseek.com/api_keys)
-- Redis 7.x（可选 — 不配置则审查结果不缓存，功能正常）
-
-### 步骤
+### 方式一：Docker Compose（推荐）
 
 ```bash
-# 1. 克隆
 git clone https://github.com/spider-freedom/code-review-bot.git
 cd code-review-bot
 
-# 2. 后端
+# 1. 启动基础设施
+docker compose up -d
+# → MySQL :3306 · Redis :6379
+
+# 2. 配置
+cp .env.example .env
+# 编辑 .env 填入 DEEPSEEK_API_KEY
+
+# 3. 后端
+cd code-review-bot-backend
+set DEEPSEEK_API_KEY=sk-xxxxxxxx    # Windows
+# export DEEPSEEK_API_KEY=sk-xxx    # macOS/Linux
+mvn spring-boot:run
+# → http://localhost:8080 · Swagger: /swagger-ui.html
+
+# 4. 前端（新终端）
+cd code-review-bot-frontend
+npm install && npm run dev
+# → http://localhost:3000
+```
+
+### 方式二：H2 快速开发（无需 Docker）
+
+```bash
 cd code-review-bot-backend
 export DEEPSEEK_API_KEY=sk-xxxxxxxx
 mvn spring-boot:run
-# → http://localhost:8080 · GET /actuator/health
-
-# 3. 前端（新终端）
-cd code-review-bot-fronted
-npm install && npm run dev
-# → http://localhost:3000
+# 使用 H2 文件数据库，无需 MySQL/Redis
 ```
 
 ---
