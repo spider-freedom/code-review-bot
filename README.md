@@ -167,37 +167,49 @@ flowchart TB
 
 ## 🚀 快速启动
 
-### Docker Compose（推荐）
+### 前置条件
+
+- Java 17+ · Maven 3.8+ · Node.js 18+
+- MySQL 8.0 + Redis 7.x（或使用 H2 模式跳过）
+- DeepSeek API Key — [获取](https://platform.deepseek.com/api_keys)
+
+### 方式一：MySQL + Redis 全功能（推荐）
 
 ```bash
 git clone https://github.com/spider-freedom/code-review-bot.git
 cd code-review-bot
 
-# 1. 启动 MySQL + Redis
-docker compose up -d
+# 1. 确保 MySQL 和 Redis 在运行，创建数据库
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS code_review_bot CHARACTER SET utf8mb4;"
 
-# 2. 配置 API Key
-cp .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY=sk-xxx
-
-# 3. 启动后端（Windows 用 set 替代 export）
+# 2. 启动后端
+cd code-review-bot-backend
+# Windows
+set DEEPSEEK_API_KEY=sk-xxxxxxxx
+mvn spring-boot:run -Dspring-boot.run.profiles=prod "-Dspring-boot.run.jvmArguments=-Dspring.flyway.enabled=false -Dspring.data.redis.password=你的Redis密码"
+# macOS/Linux
 export DEEPSEEK_API_KEY=sk-xxxxxxxx
-cd code-review-bot-backend && mvn spring-boot:run
+mvn spring-boot:run -Dspring-boot.run.profiles=prod "-Dspring-boot.run.jvmArguments=-Dspring.flyway.enabled=false -Dspring.data.redis.password=你的Redis密码"
 # → http://localhost:8080 · Swagger: /swagger-ui.html
 
-# 4. 启动前端（新终端）
+# 3. 启动前端（新终端）
 cd code-review-bot-frontend
 npm install && npm run dev
 # → http://localhost:3000
 ```
 
-### H2 快速开发（无需 Docker）
+### 方式二：H2 快速开发（无需 MySQL/Redis）
 
 ```bash
 cd code-review-bot-backend
+# Windows
+set DEEPSEEK_API_KEY=sk-xxxxxxxx
+# macOS/Linux
 export DEEPSEEK_API_KEY=sk-xxxxxxxx
+
 mvn spring-boot:run
-# 使用 H2 嵌入式数据库 + 文件持久化，无需 MySQL/Redis
+# 使用 H2 嵌入式数据库，数据和缓存均在本地文件
+# → http://localhost:8080 · Swagger: /swagger-ui.html
 ```
 
 ---
