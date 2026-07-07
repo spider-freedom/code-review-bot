@@ -32,7 +32,8 @@ public class RateLimitAspect {
             .build(new CacheLoader<>() {
                 @Override
                 public RateLimiter load(String userId) {
-                    return RateLimiter.create(5.0 / 60.0);
+                    // Warmup: allow 1-permit burst so first request always succeeds
+                    return RateLimiter.create(5.0 / 60.0, java.time.Duration.ofSeconds(10));
                 }
             });
 
@@ -47,10 +48,13 @@ public class RateLimitAspect {
         RateLimiter limiter;
         try {
             limiter = userLimiters.get(userId);
+            // Only update rate if changed — setRate() clears accumulated permits
+            if (Math.abs(limiter.getRate() - permitsPerSecond) > 0.001) {
+                limiter.setRate(permitsPerSecond);
+            }
         } catch (Exception e) {
             limiter = RateLimiter.create(permitsPerSecond);
         }
-        limiter.setRate(permitsPerSecond);
 
         if (!limiter.tryAcquire()) {
             log.warn("Rate limit exceeded: user={}, rate={}/s", userId, String.format("%.2f", permitsPerSecond));
