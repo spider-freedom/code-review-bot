@@ -1,4 +1,4 @@
-import type { ReviewIssue, ReviewTaskResponse } from '@/types/review'
+import type { ReviewIssue, ReviewTask, ReviewTaskResponse } from '@/types/review'
 import { createSSEStream } from '@/utils/sse'
 
 interface SSEChunk {
@@ -99,4 +99,14 @@ export async function getTaskIssues(taskId: string): Promise<ReviewIssue[]> {
   const response = await fetch(`${API_BASE}/tasks/${taskId}/issues`)
   if (!response.ok) throw new Error(`查询审查结果失败 (HTTP ${response.status})`)
   return response.json()
+}
+
+/**
+ * Fetch paginated review history from backend.
+ */
+export async function fetchHistory(page = 1, size = 20): Promise<ReviewTask[]> {
+  const response = await fetch(`${API_BASE}/history?page=${page}&size=${size}`)
+  if (!response.ok) throw new Error(`加载历史失败 (HTTP ${response.status})`)
+  const data = await response.json()
+  return data.data ?? []
 }

@@ -18,6 +18,8 @@ export interface ReviewTaskResponse {
   taskId: string
   status: string
   errorMessage?: string
+  code?: string
+  mode?: string
   createTime: string
   updateTime: string
 }
@@ -28,4 +30,12 @@ export interface HistoryRecord {
   code: string
   mode: 'code' | 'diff'
   result: ReviewResult
+}
+
+export interface ReviewTask {
+  taskId: string
+  code: string
+  mode: 'code' | 'diff'
+  status: string
+  createTime: string
 }

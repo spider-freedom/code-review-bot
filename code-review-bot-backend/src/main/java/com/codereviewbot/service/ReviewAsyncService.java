@@ -92,6 +92,18 @@ public class ReviewAsyncService {
     }
 
     /**
+     * Query paginated task history for a user, newest first.
+     */
+    public List<ReviewTask> getTaskHistory(String userId, int page, int size) {
+        return taskMapper.selectPage(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(page, size),
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ReviewTask>()
+                        .eq(ReviewTask::getUserId, userId)
+                        .orderByDesc(ReviewTask::getCreateTime))
+                .getRecords();
+    }
+
+    /**
      * Query issues for a completed task, scoped to user with pagination.
      */
     public List<ReviewIssue> getIssues(String taskId, String userId, int page, int size) {

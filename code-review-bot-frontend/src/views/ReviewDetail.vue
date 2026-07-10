@@ -5,49 +5,60 @@
       <h2 v-if="record">审查详情</h2>
     </div>
 
-    <div v-if="!record" class="not-found">
+    <div v-if="!task && !loading" class="not-found">
       <p>未找到该审查记录</p>
     </div>
 
-    <template v-else>
+    <template v-else-if="task">
       <div class="meta-bar">
-        <span>审查时间：{{ formatTime(record.createdAt) }}</span>
-        <el-tag size="small" :type="record.mode === 'diff' ? 'success' : ''">
-          {{ record.mode === 'diff' ? 'Git Diff' : '代码片段' }}
+        <span>审查时间：{{ task.createTime ? formatTime(task.createTime) : '' }}</span>
+        <el-tag size="small" :type="task.mode === 'diff' ? 'success' : ''">
+          {{ task.mode === 'diff' ? 'Git Diff' : '代码' }}
+        </el-tag>
+        <el-tag size="small" :type="task.status === 'COMPLETED' ? 'success' : 'warning'">
+          {{ task.status === 'COMPLETED' ? '已完成' : task.status }}
         </el-tag>
       </div>
 
-      <DiffViewer
-        v-if="record.mode === 'diff'"
-        :diff-text="record.code"
-        class="section"
-      />
-      <CodeHighlight
-        v-else
-        :code="record.code"
-        class="section"
-      />
-
-      <ReviewReport :result="record.result" class="section" />
+      <ReviewReport v-if="issues.length" :result="{ issues, summary: `共 ${issues.length} 个问题` }" class="section" />
+      <div v-else-if="loading" style="text-align:center;padding:40px">加载中...</div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { useReviewStore } from '@/stores/review'
 import { formatTime } from '@/utils/format'
+import { getTaskStatus, getTaskIssues } from '@/api/review'
+import type { ReviewIssue, ReviewTask } from '@/types/review'
 import DiffViewer from '@/components/DiffViewer.vue'
 import CodeHighlight from '@/components/CodeHighlight.vue'
 import ReviewReport from '@/components/ReviewReport.vue'
 
 const route = useRoute()
 const router = useRouter()
-const store = useReviewStore()
 
-const record = computed(() => store.historyById(route.params.id as string))
+const task = ref<ReviewTask | null>(null)
+const issues = ref<ReviewIssue[]>([])
+const loading = ref(false)
+
+onMounted(async () => {
+  const taskId = route.params.id as string
+  loading.value = true
+  try {
+    const t = await getTaskStatus(taskId)
+    task.value = { taskId: t.taskId, code: t.code || '', mode: (t.mode as 'code' | 'diff') || 'code', status: t.status, createTime: t.createTime }
+    if (t.status === 'COMPLETED') {
+      issues.value = await getTaskIssues(taskId)
+    }
+  } catch {
+    task.value = null
+  } finally {
+    loading.value = false
+  }
+})
 
 function goBack() {
   router.push({ name: 'history' })

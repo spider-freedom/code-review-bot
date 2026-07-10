@@ -65,6 +65,8 @@ public class ReviewController {
                 .taskId(task.getTaskId())
                 .status(task.getStatus())
                 .errorMessage(task.getErrorMessage())
+                .code(task.getCode())
+                .mode(task.getMode())
                 .createTime(task.getCreateTime())
                 .updateTime(task.getUpdateTime())
                 .build());
@@ -82,6 +84,18 @@ public class ReviewController {
             HttpServletRequest httpReq) {
         String userId = (String) httpReq.getAttribute("userId");
         return ApiResponse.ok(asyncService.getIssues(taskId, userId, page, size));
+    }
+
+    // ── History ─────────────────────────────────────────────────────────────
+
+    /** List user's review history, newest first. */
+    @GetMapping("/history")
+    public ApiResponse<List<ReviewTask>> getHistory(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size,
+            HttpServletRequest httpReq) {
+        String userId = (String) httpReq.getAttribute("userId");
+        return ApiResponse.ok(asyncService.getTaskHistory(userId, page, size));
     }
 
     // ── SSE streaming (real-time preview, kept for compatibility) ──────────

@@ -1,23 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ReviewIssue, ReviewResult, ReviewStatus, HistoryRecord } from '@/types/review'
+import type { ReviewIssue, ReviewResult, ReviewStatus } from '@/types/review'
 import { reviewCodeStream, submitReview, getTaskStatus, getTaskIssues } from '@/api/review'
-
-const HISTORY_KEY = 'code-review-history'
-const MAX_HISTORY = 50
-
-function loadFromStorage(): HistoryRecord[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
-}
-
-function saveToStorage(records: HistoryRecord[]) {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(records))
-}
 
 export const useReviewStore = defineStore('review', () => {
   // ---- state ----
@@ -28,7 +12,6 @@ export const useReviewStore = defineStore('review', () => {
   const diffContent = ref('')
   const currentCode = ref('')
   const currentMode = ref<'code' | 'diff'>('code')
-  const history = ref<HistoryRecord[]>(loadFromStorage())
 
   // ---- getters ----
   const issueCount = computed(() => {
@@ -39,10 +22,6 @@ export const useReviewStore = defineStore('review', () => {
   const errorCount = computed(() => {
     const issues = currentResult.value?.issues ?? streamIssues.value
     return issues.filter((i) => i.severity === 'error').length
-  })
-
-  const historyById = computed(() => {
-    return (id: string) => history.value.find((r) => r.id === id) ?? null
   })
 
   // ---- actions ----
@@ -77,11 +56,7 @@ export const useReviewStore = defineStore('review', () => {
           summary,
         }
         status.value = 'done'
-        saveToHistory(
-          currentResult.value,
-          currentCode.value,
-          currentMode.value,
-        )
+        // History is now stored server-side via MySQL, fetched from /api/review/history
       },
       onError(err) {
         if (generation !== gen) return
@@ -107,24 +82,7 @@ export const useReviewStore = defineStore('review', () => {
   function finishReview(summary: string) {
     currentResult.value = { issues: [...streamIssues.value], summary }
     status.value = 'done'
-    saveToHistory(currentResult.value, currentCode.value, currentMode.value)
-  }
-
-  function saveToHistory(result: ReviewResult, code: string, mode: 'code' | 'diff') {
-    const record: HistoryRecord = {
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-      createdAt: new Date().toISOString(),
-      code,
-      mode,
-      result,
-    }
-    history.value = [record, ...history.value].slice(0, MAX_HISTORY)
-    saveToStorage(history.value)
-  }
-
-  function deleteHistory(id: string) {
-    history.value = history.value.filter((r) => r.id !== id)
-    saveToStorage(history.value)
+    // History stored server-side via MySQL
   }
 
   function clearCurrentReview() {
@@ -169,7 +127,7 @@ export const useReviewStore = defineStore('review', () => {
               summary: `审查完成，共发现 ${issues.length} 个问题`,
             }
             status.value = 'done'
-            saveToHistory(currentResult.value, currentCode.value, currentMode.value)
+            // History persisted to MySQL via ReviewAsyncService
           } else if (task.status === 'FAILED') {
             clearInterval(asyncPollTimer!)
             asyncPollTimer = null
@@ -203,18 +161,14 @@ export const useReviewStore = defineStore('review', () => {
     diffContent,
     currentCode,
     currentMode,
-    history,
     // getters
     issueCount,
     errorCount,
-    historyById,
     // actions
     startReview,
     stopReview,
     addIssue,
     finishReview,
-    saveToHistory,
-    deleteHistory,
     clearCurrentReview,
     // async
     startAsyncReview,
