@@ -2,7 +2,7 @@
   <div class="review-detail">
     <div class="detail-header">
       <el-button :icon="ArrowLeft" @click="goBack">返回历史记录</el-button>
-      <h2 v-if="record">审查详情</h2>
+      <h2 v-if="task">审查详情</h2>
     </div>
 
     <div v-if="!task && !loading" class="not-found">
@@ -33,8 +33,6 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import { formatTime } from '@/utils/format'
 import { getTaskStatus, getTaskIssues } from '@/api/review'
 import type { ReviewIssue, ReviewTask } from '@/types/review'
-import DiffViewer from '@/components/DiffViewer.vue'
-import CodeHighlight from '@/components/CodeHighlight.vue'
 import ReviewReport from '@/components/ReviewReport.vue'
 
 const route = useRoute()
