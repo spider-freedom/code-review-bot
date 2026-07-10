@@ -21,3 +21,16 @@ jobs:
       - name: Build & Test
         run: cd code-review-bot-backend && mvn test
 
+  frontend:
+    name: Frontend Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install & Test
+        run: cd code-review-bot-frontend && npm install && npm test -- --run
+      - name: Build
+        run: cd code-review-bot-frontend && npm run build
+
