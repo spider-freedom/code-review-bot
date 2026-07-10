@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: 20
       - name: Install & Test
-        run: cd code-review-bot-frontend && npm install && npm test -- --run
+        run: cd code-review-bot-frontend && rm -rf node_modules package-lock.json && npm install && npm test -- --run
       - name: Build
         run: cd code-review-bot-frontend && npm run build
 
