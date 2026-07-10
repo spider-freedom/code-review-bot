@@ -1,18 +1,15 @@
 spring:
   datasource:
-    driver-class-name: org.h2.Driver
-    url: jdbc:h2:file:./data/review-bot;MODE=MySQL;AUTO_SERVER=TRUE
-    username: sa
-    password:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:mysql://localhost:3306/code_review_bot?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123456}
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
+      maximum-pool-size: 20
+      minimum-idle: 5
       idle-timeout: 300000
       max-lifetime: 1200000
       connection-timeout: 10000
-  h2:
-    console:
-      enabled: false
   flyway:
     enabled: true
     locations: classpath:db/migration
