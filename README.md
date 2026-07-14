@@ -26,7 +26,7 @@
 |------|------|------|
 | 🔗 **GitHub Webhook** | 监听 PR 事件，自动拉 diff → AI 审查 → 回贴行级评论 | `WebhookController` + `GitHubClient` |
 | 🔄 **异步审查** | 提交后立即返回 taskId，线程池后台调 AI，前端 2s 轮询 | 线程池 + `review_task` 状态机 |
-| ⚡ **结果缓存** | 相同代码 SHA-256 1h 内命中缓存，零 API 消耗 | Redis + SHA-256 |
+| ⚡ **结果缓存** | 相同代码 MD5 1h 内命中缓存，零 API 消耗 | Redis + MD5 |
 | 🛡️ **Redis 降级** | 缓存不可用时自动 fallback 直接调 AI，不阻塞业务 | try-catch 双路径 |
 | 👥 **多租户隔离** | X-User-Id 请求头提取用户，查询强制带 userId | `ApiKeyFilter` + MyBatis-Plus |
 | 🚦 **限流保护** | 单用户 5 次/分钟，Guava 令牌桶算法，超限 HTTP 429 | `@RateLimit` + AOP |
@@ -80,7 +80,7 @@
 | 🔗 | **PR 自动审查** | GitHub Webhook 触发，审查结果自动回贴 PR 评论 |
 | 🔄 | **异步提交** | 提交后返回 taskId，每 2s 轮询，可离开页面 |
 | 📡 | **SSE 流式** | 实时逐条渲染审查结果 |
-| ⚡ | **结果缓存** | SHA-256 去重，1h TTL，零 AI 消耗 |
+| ⚡ | **结果缓存** | MD5 去重，1h TTL，零 AI 消耗 |
 | 🔀 | **双模式输入** | 代码片段 / Git Diff 一键切换 |
 | 📊 | **三级分级** | error（红） / warning（黄） / info（蓝） |
 | 👥 | **多租户** | 审查历史按用户完全隔离 |
@@ -94,7 +94,7 @@
 |------|----------|
 | **后端** | Spring Boot 3.5 · Java 17 · MyBatis-Plus 3.5.7 · Spring RestClient |
 | **数据库** | MySQL 8.0（生产）· H2 MySQL 模式（开发）· Flyway 迁移 |
-| **缓存** | Redis 7.x（Lettuce）· SHA-256 去重 key |
+| **缓存** | Redis 7.x（Lettuce）· MD5 去重 key |
 | **AI 客户端** | `DeepSeekClient` · REST 非流式 / SSE 流式双模式 |
 | **Webhook** | GitHub API · PR diff 拉取 · 审查评论自动回贴 |
 | **限流** | Guava RateLimiter · AOP 注解驱动 · per-user 令牌桶 |
@@ -139,7 +139,7 @@ flowchart TB
 
     subgraph Infra["基础设施 Docker Compose"]
         MySQL[(MySQL 8.0<br/>review_task · review_issue)]
-        Redis[(Redis 7.x<br/>SHA-256 缓存 · 1h TTL)]
+        Redis[(Redis 7.x<br/>MD5 缓存 · 1h TTL)]
         FlywayM[Flyway 迁移<br/>V1__init.sql]
     end
 
